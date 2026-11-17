@@ -943,9 +943,9 @@ fun ToolsScreen(
             text = {
                 Column {
                     Text(
-                        text = "الصق رابط ملف أو صفحة ويب. يفحص CinemaX نوع الملف واسمه وحجمه، ويحوّل صفحات المنصات إلى المستكشف عند الحاجة. ويمكنك مشاركة ملف من أي تطبيق إلى CinemaX مباشرة.",
+                        text = "أدخل رابط ملف مباشر. سيتم فحص النوع والحجم قبل بدء التنزيل. روابط الصفحات ليست ملفات مباشرة.",
                         color = Color(0xFFA9B4D6),
-                        fontSize = 12.sp,
+                        fontSize = 10.sp,
                         modifier = Modifier.padding(bottom = 10.dp)
                     )
 
@@ -963,7 +963,7 @@ fun ToolsScreen(
                             },
                             placeholder = { Text("رابط فيديو أو PDF أو ZIP أو أي ملف مدعوم", color = Color(0xFF8B96BD), fontSize = 11.sp) },
                             minLines = 1,
-                            maxLines = 3,
+                            maxLines = 2,
                             enabled = !isDownloading && !isDownloadPaused,
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedTextColor = Color.White,
@@ -1002,23 +1002,6 @@ fun ToolsScreen(
                         ) {
                             Text("لصق", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
-                    }
-
-                    // Quick Web Video Sniffer Option
-                    OutlinedButton(
-                        onClick = {
-                            returnToDownloadAfterSniffer = true
-                            showDownloadDialog = false
-                            showSnifferDialog = true
-                        },
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF22E3FF)),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x6622E3FF)),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp).testTag("open_web_sniffer_dialog_btn")
-                    ) {
-                        Icon(Icons.Default.Language, contentDescription = null, tint = Color(0xFF22E3FF), modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("المستكشف الذكي لالتقاط ملفات الفيديو المباشرة المتاحة 🌐", fontSize = 11.sp, fontWeight = FontWeight.Medium)
                     }
 
                     // Verification Check Button & Status
@@ -1101,30 +1084,11 @@ fun ToolsScreen(
                                         }
                                         Spacer(modifier = Modifier.height(4.dp))
                                         Text(res.advice, color = Color(0xFFE6EAFA), fontSize = 11.sp)
-                                        Spacer(modifier = Modifier.height(8.dp))
-                                        if (res.platform.equals("YouTube", ignoreCase = true)) {
-                                            Text(
-                                                "لا يبدأ التنزيل من رابط صفحة YouTube. استخدم خيار التنزيل الرسمي المتاح لحسابك، أو رابط ملف مباشر يتيحه مالك المحتوى.",
-                                                color = Color(0xFFFFD180),
-                                                fontSize = 11.sp
-                                            )
-                                        } else {
-                                            Button(
-                                                onClick = {
-                                                    returnToDownloadAfterSniffer = true
-                                                    showDownloadDialog = false
-                                                    showSnifferDialog = true
-                                                },
-                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF22E3FF), contentColor = Color(0xFF0E1230)),
-                                                shape = RoundedCornerShape(8.dp),
-                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                                                modifier = Modifier.fillMaxWidth().testTag("launch_sniffer_from_social_btn")
-                                            ) {
-                                                Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
-                                                Spacer(modifier = Modifier.width(6.dp))
-                                                Text("فتح المستكشف لالتقاط ملف مباشر متاح 🌐", fontWeight = FontWeight.Bold, fontSize = 11.sp)
-                                            }
-                                        }
+                                        Text(
+                                            "صفحة ويب وليست ملفاً مباشراً. استخدم مستكشف الفيديو من الإعدادات عند الحاجة.",
+                                            color = Color(0xFFB8C5EB),
+                                            fontSize = 10.sp
+                                        )
                                     }
                                 }
                             }
@@ -1319,16 +1283,14 @@ fun ToolsScreen(
 
                                         if (currentVerification is com.example.media.RealMediaDownloader.VideoVerificationResult.SocialWebPage) {
                                             val socialPage = currentVerification
-                                            if (socialPage.platform.equals("YouTube", ignoreCase = true)) {
-                                                isDownloading = false
-                                                isVerifyingUrl = false
-                                                Toast.makeText(context, socialPage.advice, Toast.LENGTH_LONG).show()
+                                            isDownloading = false
+                                            isVerifyingUrl = false
+                                            val message = if (socialPage.platform.equals("YouTube", ignoreCase = true)) {
+                                                socialPage.advice
                                             } else {
-                                                returnToDownloadAfterSniffer = true
-                                                showDownloadDialog = false
-                                                showSnifferDialog = true
-                                                Toast.makeText(context, "تم فتح المستكشف. شغّل الفيديو أولاً، وسيظهر الملف المباشر إذا أتاحه الموقع.", Toast.LENGTH_LONG).show()
+                                                "هذا رابط صفحة ${socialPage.platform} وليس ملفاً مباشراً. افتح مستكشف الفيديو من الإعدادات لالتقاط مصدر متاح."
                                             }
+                                            Toast.makeText(context, message, Toast.LENGTH_LONG).show()
                                             return@launch
                                         }
 
@@ -1434,18 +1396,12 @@ fun ToolsScreen(
                                                     )
                                                 ) {
                                                     is com.example.media.RealMediaDownloader.VideoVerificationResult.SocialWebPage -> {
-                                                        if (check.platform.equals("YouTube", ignoreCase = true)) {
-                                                            Toast.makeText(context, check.advice, Toast.LENGTH_LONG).show()
-                                                        } else {
-                                                            returnToDownloadAfterSniffer = true
-                                                            showDownloadDialog = false
-                                                            showSnifferDialog = true
-                                                            Toast.makeText(
-                                                                context,
-                                                                "تم فتح المستكشف. شغّل الوسائط، وسيظهر الملف المباشر فقط إذا أتاحه الموقع.",
-                                                                Toast.LENGTH_LONG
-                                                            ).show()
-                                                        }
+                                                        Toast.makeText(
+                                                            context,
+                                                            if (check.platform.equals("YouTube", ignoreCase = true)) check.advice
+                                                            else "هذا رابط صفحة ${check.platform} وليس ملفاً مباشراً. افتح مستكشف الفيديو من الإعدادات.",
+                                                            Toast.LENGTH_LONG
+                                                        ).show()
                                                     }
                                                     is com.example.media.RealMediaDownloader.VideoVerificationResult.Invalid -> {
                                                         Toast.makeText(context, check.reason, Toast.LENGTH_LONG).show()
@@ -1539,17 +1495,12 @@ fun ToolsScreen(
                 // request. Require the server response to prove it is a video.
                 downloadExpectedMimeType = source.mimeType ?: "video/*"
                 verificationResult = null
-                returnToDownloadAfterSniffer = false
                 showSnifferDialog = false
                 showDownloadDialog = true
                 Toast.makeText(context, "تم التقاط رابط مباشر. افحصه ثم ابدأ التنزيل.", Toast.LENGTH_LONG).show()
             },
             onDismiss = {
                 showSnifferDialog = false
-                if (returnToDownloadAfterSniffer) {
-                    returnToDownloadAfterSniffer = false
-                    showDownloadDialog = true
-                }
             }
         )
     }
