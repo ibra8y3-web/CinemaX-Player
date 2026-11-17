@@ -114,6 +114,52 @@ class RealMediaDownloaderRoutingTest {
     }
 
     @Test
+    fun snifferAcceptsVideoMimeButRejectsAudioMimeAndPlaylists() {
+        assertTrue(
+            com.example.media.WebVideoSnifferHelper.isMediaStreamUrl(
+                "https://cdn.example.net/opaque?id=123",
+                "video/mp4"
+            )
+        )
+        assertFalse(
+            com.example.media.WebVideoSnifferHelper.isMediaStreamUrl(
+                "https://cdn.example.net/opaque?id=123",
+                "audio/mpeg"
+            )
+        )
+        assertFalse(
+            com.example.media.WebVideoSnifferHelper.isMediaStreamUrl(
+                "https://cdn.example.net/live/manifest.m3u8",
+                "video/mp2t"
+            )
+        )
+    }
+
+    @Test
+    fun playingVideoElementIsRankedAboveIncidentalNetworkRequest() {
+        val networkRequest = com.example.media.CapturedVideoSource(
+            url = "https://video.example.net/ad.mp4",
+            pageUrl = "https://www.facebook.com/reel/123",
+            requestHeaders = emptyMap(),
+            sourceKind = "network"
+        )
+        val activeVideo = com.example.media.CapturedVideoSource(
+            url = "https://video.example.net/actual-reel.mp4",
+            pageUrl = "https://www.facebook.com/reel/123",
+            requestHeaders = emptyMap(),
+            sourceKind = "active-video",
+            mimeType = "video/mp4",
+            width = 720,
+            height = 1280,
+            durationMs = 18_000L,
+            currentTimeMs = 5_000L,
+            isPlaying = true
+        )
+
+        assertTrue(activeVideo.confidenceScore > networkRequest.confidenceScore)
+    }
+
+    @Test
     fun nonHttpSchemesAreRejected() {
         val result = com.example.media.DownloadLinkAnalyzer.analyze("file:///sdcard/video.mp4")
         assertEquals(com.example.media.DownloadLinkAnalyzer.Route.INVALID, result.route)

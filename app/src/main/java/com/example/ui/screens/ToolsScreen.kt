@@ -157,6 +157,7 @@ fun ToolsScreen(
     var showDownloadDialog by remember { mutableStateOf(false) }
     var downloadUrl by remember { mutableStateOf("") }
     var downloadRequestHeaders by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var downloadExpectedMimeType by remember { mutableStateOf<String?>(null) }
     var isDownloading by remember { mutableStateOf(false) }
     var showSnifferDialog by remember { mutableStateOf(false) }
     var returnToDownloadAfterSniffer by remember { mutableStateOf(false) }
@@ -935,6 +936,7 @@ fun ToolsScreen(
                             onValueChange = {
                                 downloadUrl = it
                                 downloadRequestHeaders = emptyMap()
+                                downloadExpectedMimeType = null
                                 verificationResult = null
                             },
                             placeholder = { Text("رابط فيديو أو PDF أو ZIP أو أي ملف مدعوم", color = Color(0xFF8B96BD), fontSize = 11.sp) },
@@ -960,6 +962,7 @@ fun ToolsScreen(
                                     if (!clip.isNullOrBlank()) {
                                         downloadUrl = clip.trim()
                                         downloadRequestHeaders = emptyMap()
+                                        downloadExpectedMimeType = null
                                         verificationResult = null
                                         Toast.makeText(context, "تم لصق الرابط بنجاح", Toast.LENGTH_SHORT).show()
                                     } else {
@@ -1010,7 +1013,11 @@ fun ToolsScreen(
                                     isVerifyingUrl = true
                                     verificationResult = null
                                     scope.launch {
-                                        val result = com.example.media.RealMediaDownloader.verifyVideoBeforeDownload(downloadUrl, downloadRequestHeaders)
+                                        val result = com.example.media.RealMediaDownloader.verifyVideoBeforeDownload(
+                                            downloadUrl,
+                                            downloadRequestHeaders,
+                                            downloadExpectedMimeType
+                                        )
                                         verificationResult = result
                                         isVerifyingUrl = false
                                     }
@@ -1230,6 +1237,7 @@ fun ToolsScreen(
                                                                 showDownloadDialog = false
                                                                 downloadUrl = ""
                                                                 downloadRequestHeaders = emptyMap()
+                                                                downloadExpectedMimeType = null
                                                                 downloadProgressText = ""
                                                                 downloadPercent = 0
                                                                 downloadSpeedText = ""
@@ -1278,7 +1286,11 @@ fun ToolsScreen(
                                         var currentVerification = verificationResult
                                         if (currentVerification == null) {
                                             isVerifyingUrl = true
-                                            currentVerification = com.example.media.RealMediaDownloader.verifyVideoBeforeDownload(urlToDownload, downloadRequestHeaders)
+                                            currentVerification = com.example.media.RealMediaDownloader.verifyVideoBeforeDownload(
+                                                urlToDownload,
+                                                downloadRequestHeaders,
+                                                downloadExpectedMimeType
+                                            )
                                             verificationResult = currentVerification
                                             isVerifyingUrl = false
                                         }
@@ -1344,6 +1356,7 @@ fun ToolsScreen(
                                                     showDownloadDialog = false
                                                     downloadUrl = ""
                                                     downloadRequestHeaders = emptyMap()
+                                                    downloadExpectedMimeType = null
                                                     downloadProgressText = ""
                                                     downloadPercent = 0
                                                     downloadSpeedText = ""
@@ -1394,7 +1407,8 @@ fun ToolsScreen(
                                                 when (
                                                     val check = com.example.media.RealMediaDownloader.verifyVideoBeforeDownload(
                                                         links.first(),
-                                                        downloadRequestHeaders
+                                                        downloadRequestHeaders,
+                                                        downloadExpectedMimeType
                                                     )
                                                 ) {
                                                     is com.example.media.RealMediaDownloader.VideoVerificationResult.SocialWebPage -> {
@@ -1499,6 +1513,9 @@ fun ToolsScreen(
             onVideoFound = { source: com.example.media.CapturedVideoSource ->
                 downloadUrl = source.url
                 downloadRequestHeaders = source.requestHeaders
+                // This URL came from an actual HTML video element or a video-CDN
+                // request. Require the server response to prove it is a video.
+                downloadExpectedMimeType = source.mimeType ?: "video/*"
                 verificationResult = null
                 returnToDownloadAfterSniffer = false
                 showSnifferDialog = false
