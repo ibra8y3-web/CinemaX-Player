@@ -1,0 +1,13 @@
+<resources>
+    <string name="app_name">CinemaX Player</string>
+    <string name="nav_videos">الفيديوهات</string>
+    <string name="nav_folders">المجلدات</string>
+    <string name="nav_live">تلفاز وبث</string>
+    <string name="nav_radio">راديو وإذاعات</string>
+    <string name="nav_vault">الخزنة الآمنة</string>
+    <string name="nav_tools">أدوات إضافية</string>
+    <string name="search_placeholder">بحث في الفيديوهات أو نطق صوتي...</string>
+    <string name="no_videos_found">لم يتم العثور على أي مقاطع فيديو</string>
+    <string name="grant_permission_msg">يحتاج التطبيق للوصول لمكتبة الوسائط لاكتشاف وتشغيل الفيديوهات بجودة فائقة</string>
+    <string name="grant_permission_btn">منح إذن الوسائط</string>
+</resources>
