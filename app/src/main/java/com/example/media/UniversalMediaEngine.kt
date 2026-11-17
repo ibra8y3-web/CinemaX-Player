@@ -2,6 +2,8 @@ package com.example.media
 
 import android.content.ContentValues
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -139,12 +141,16 @@ object UniversalMediaEngine {
         context: Context,
         urls: List<String>,
         audioOnly: Boolean = false,
-        formatId: String? = null,
+        selectedFormat: FormatOption? = null,
+        wifiOnly: Boolean = false,
         processId: String = UUID.randomUUID().toString(),
         onProgress: (Progress) -> Unit = {}
     ): List<DownloadedFile> = withContext(Dispatchers.IO) {
         require(urls.isNotEmpty()) { "أدخل رابطاً واحداً على الأقل." }
         urls.forEach(::requireHttpUrl)
+        if (wifiOnly && !isWifiConnected(context)) {
+            throw IllegalStateException("التنزيل مضبوط على Wi-Fi فقط. اتصل بشبكة Wi-Fi أو أوقف الخيار من الإعدادات.")
+        }
         ensureInitialized(context)
 
         val appContext = context.applicationContext
@@ -171,11 +177,13 @@ object UniversalMediaEngine {
             request.addOption("--audio-format", "mp3")
             request.addOption("--audio-quality", "0")
         } else {
-            val selected = formatId?.takeIf { it.isNotBlank() }
+            val selected = selectedFormat
             if (selected != null) {
-                // A video-only format is paired with the best available audio stream.
-                val option = if (selected.contains("+")) selected else selected
-                request.addOption("-f", option)
+                val formatSelector = when {
+                    selected.hasVideo && !selected.hasAudio -> "${selected.formatId}+bestaudio/best"
+                    else -> selected.formatId
+                }
+                request.addOption("-f", formatSelector)
             } else {
                 request.addOption("-f", "bv*+ba/best")
             }
@@ -221,6 +229,8 @@ object UniversalMediaEngine {
                 error.message?.take(700) ?: "تعذر استخراج أو تنزيل الوسائط من هذا الرابط.",
                 error
             )
+        } finally {
+            runCatching { workDirectory.deleteRecursively() }
         }
     }
 
@@ -292,6 +302,14 @@ object UniversalMediaEngine {
         source.delete()
         return DownloadedFile(target.name, size, target.absolutePath, mimeType)
     }
+
+    private fun isWifiConnected(context: Context): Boolean = runCatching {
+        val manager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            ?: return false
+        val network = manager.activeNetwork ?: return false
+        val capabilities = manager.getNetworkCapabilities(network) ?: return false
+        capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+    }.getOrDefault(false)
 
     private fun requireHttpUrl(value: String) {
         val uri = Uri.parse(value.trim())
