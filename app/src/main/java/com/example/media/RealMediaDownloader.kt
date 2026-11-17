@@ -105,6 +105,29 @@ object RealMediaDownloader {
         MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension.lowercase(Locale.ROOT))
             ?: "application/octet-stream"
 
+    private fun isKnownVideoExtension(extension: String?): Boolean =
+        extension?.lowercase(Locale.ROOT) in setOf(
+            "mp4", "m4v", "webm", "mov", "mkv", "3gp", "avi", "flv", "mpeg", "mpg", "ts"
+        )
+
+    /** Conservative file-signature check used when a video CDN returns octet-stream without a suffix. */
+    private fun hasVideoFileSignature(bytes: ByteArray, count: Int): Boolean {
+        if (count >= 8 && String(bytes, 4, 4, StandardCharsets.US_ASCII) == "ftyp") return true
+        if (count >= 4 && bytes[0] == 0x1A.toByte() &&
+            bytes[1] == 0x45.toByte() && bytes[2] == 0xDF.toByte() && bytes[3] == 0xA3.toByte()
+        ) return true
+        if (count >= 3 && String(bytes, 0, 3, StandardCharsets.US_ASCII) == "FLV") return true
+        if (count >= 12 && String(bytes, 0, 4, StandardCharsets.US_ASCII) == "RIFF" &&
+            String(bytes, 8, 4, StandardCharsets.US_ASCII) == "AVI "
+        ) return true
+        if (count >= 376 && bytes[0] == 0x47.toByte() && bytes[188] == 0x47.toByte()) return true
+        if (count >= 4 && bytes[0] == 0x00.toByte() && bytes[1] == 0x00.toByte() &&
+            bytes[2] == 0x01.toByte() &&
+            (bytes[3] == 0xBA.toByte() || bytes[3] == 0xB3.toByte())
+        ) return true
+        return false
+    }
+
     private fun applyRequestHeaders(
         connection: HttpURLConnection,
         headers: Map<String, String>,
@@ -228,7 +251,8 @@ object RealMediaDownloader {
      */
     suspend fun verifyVideoBeforeDownload(
         urlStr: String,
-        requestHeaders: Map<String, String> = emptyMap()
+        requestHeaders: Map<String, String> = emptyMap(),
+        expectedMimeType: String? = null
     ): VideoVerificationResult = withContext(Dispatchers.IO) {
         val analysis = DownloadLinkAnalyzer.analyze(urlStr)
         val trimmed = analysis.normalizedUrl
@@ -323,10 +347,38 @@ object RealMediaDownloader {
             val mimeIsPage = contentType.contains("text/html") || contentType.contains("application/xhtml")
             val hasFileEvidence = contentDisposition?.contains("filename", ignoreCase = true) == true ||
                 DownloadLinkAnalyzer.isDownloadableExtension(extension)
+            val mustBeVideo = expectedMimeType?.startsWith("video/", ignoreCase = true) == true
+            val shouldProbeVideoSignature = mustBeVideo &&
+                !contentType.startsWith("video/") &&
+                !isKnownVideoExtension(extension) &&
+                !contentType.startsWith("audio/") &&
+                !contentType.startsWith("image/") &&
+                !mimeIsPage
+            val signatureMatchesVideo = if (shouldProbeVideoSignature) {
+                runCatching {
+                    val bytes = ByteArray(512)
+                    val count = active.inputStream.use { input ->
+                        var total = 0
+                        while (total < bytes.size) {
+                            val read = input.read(bytes, total, bytes.size - total)
+                            if (read <= 0) break
+                            total += read
+                        }
+                        total
+                    }
+                    hasVideoFileSignature(bytes, count)
+                }.getOrDefault(false)
+            } else false
             active.disconnect()
             conn = null
 
             if (mimeIsPage) {
+                if (mustBeVideo) {
+                    return@withContext VideoVerificationResult.Invalid(
+                        "المصدر المحدد أعاد صفحة ويب وليس ملف فيديو. لم يبدأ التنزيل حتى لا يتم حفظ صفحة أو إعلان باسم فيديو.",
+                        contentType
+                    )
+                }
                 val provider = analysis.provider?.displayName ?: "موقع ويب"
                 val advice = if (analysis.provider == DownloadLinkAnalyzer.Provider.YOUTUBE) {
                     analysis.advice
@@ -349,6 +401,25 @@ object RealMediaDownloader {
                     },
                     contentType
                 )
+            }
+
+            if (mustBeVideo) {
+                val responseIsNonVideo = contentType.startsWith("audio/") ||
+                    contentType.startsWith("image/") ||
+                    contentType.startsWith("font/") ||
+                    contentType.contains("json") ||
+                    contentType.contains("xml")
+                if (responseIsNonVideo || (
+                    !contentType.startsWith("video/") &&
+                        !isKnownVideoExtension(extension) &&
+                        !signatureMatchesVideo
+                    )
+                ) {
+                    return@withContext VideoVerificationResult.Invalid(
+                        "تعذر تأكيد أن المصدر المحدد فيديو حقيقي (Content-Type: $contentType). قد يكون طلب إعلان أو صورة مصغّرة؛ لم يتم تنزيله.",
+                        contentType
+                    )
+                }
             }
 
             val isStructuredData = contentType.contains("application/json") ||
