@@ -319,7 +319,7 @@ object RealMediaDownloader {
                 ?: suggestedName?.substringAfterLast('.', "")?.takeIf { '.' in suggestedName }
                 ?: ""
             val mimeIsPage = contentType.contains("text/html") || contentType.contains("application/xhtml")
-            val hasFileEvidence = !suggestedName.isNullOrBlank() ||
+            val hasFileEvidence = contentDisposition?.contains("filename", ignoreCase = true) == true ||
                 DownloadLinkAnalyzer.isDownloadableExtension(extension)
             active.disconnect()
             conn = null
@@ -379,9 +379,13 @@ object RealMediaDownloader {
             val finalMime = if (contentType == "application/octet-stream" && finalExtension != "bin") {
                 mimeTypeForExtension(finalExtension)
             } else contentType
-            val fileName = suggestedName
+            val rawFileName = suggestedName
                 ?: Uri.parse(currentUrl).lastPathSegment?.let(::sanitizeFileName)
-                ?: "CinemaX_${System.currentTimeMillis()}.$finalExtension"
+            val fileName = when {
+                rawFileName.isNullOrBlank() -> "CinemaX_${System.currentTimeMillis()}.$finalExtension"
+                '.' in rawFileName.substringAfterLast('/') -> rawFileName
+                else -> "$rawFileName.$finalExtension"
+            }
             val category = categoryFor(finalMime, finalExtension)
             val format = if (finalExtension.isNotBlank()) {
                 finalExtension.uppercase(Locale.ROOT)
@@ -433,7 +437,7 @@ object RealMediaDownloader {
         var currentUrl = normalizeUrl(urlStr)
         var redirects = 0
         var finalUrl = currentUrl
-        var mimeType = "video/mp4"
+        var mimeType = "application/octet-stream"
 
         while (redirects < 10) {
             val url = URL(currentUrl)
