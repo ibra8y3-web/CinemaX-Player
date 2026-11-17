@@ -4,6 +4,7 @@ import android.app.DownloadManager
 import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
+import android.provider.OpenableColumns
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
@@ -18,6 +19,8 @@ import java.io.InputStream
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLDecoder
+import java.nio.charset.StandardCharsets
 import java.util.Locale
 
 object RealMediaDownloader {
@@ -48,24 +51,57 @@ object RealMediaDownloader {
         return trimmed
     }
 
-    private fun socialPlatformLabel(url: String): String? {
-        val host = Uri.parse(url).host?.lowercase(Locale.ROOT) ?: return null
-        fun matches(domain: String) = host == domain || host.endsWith(".$domain")
-        return when {
-            matches("facebook.com") || matches("fb.watch") || matches("fb.com") -> "Facebook"
-            matches("instagram.com") -> "Instagram"
-            matches("tiktok.com") -> "TikTok"
-            matches("youtube.com") || matches("youtu.be") -> "YouTube"
-            matches("x.com") || matches("twitter.com") -> "X / Twitter"
-            else -> null
-        }
-    }
+    private fun socialPlatformLabel(url: String): String? =
+        DownloadLinkAnalyzer.analyze(url).provider?.displayName
 
     private fun hasVideoFileExtension(url: String): Boolean {
         val path = Uri.parse(url).path?.lowercase(Locale.ROOT).orEmpty()
-        val extension = path.substringAfterLast('.', "")
-        return extension in setOf("mp4", "m4v", "webm", "mov", "mkv", "3gp", "avi", "flv", "m3u8", "mpd")
+        val extension = path.substringAfterLast('.', "").takeIf { '.' in path }
+        return DownloadLinkAnalyzer.isDownloadableExtension(extension)
     }
+
+    private fun fileExtensionFromUrl(url: String): String? {
+        val path = Uri.parse(url).path?.substringAfterLast('/').orEmpty()
+        val extension = path.substringAfterLast('.', "").lowercase(Locale.ROOT)
+        return extension.takeIf { '.' in path && it.matches(Regex("[a-z0-9]{1,10}")) }
+    }
+
+    private fun extractFileName(contentDisposition: String?, url: String): String? {
+        val disposition = contentDisposition.orEmpty()
+        val encodedName = Regex("filename\\*\\s*=\\s*UTF-8''([^;]+)", RegexOption.IGNORE_CASE)
+            .find(disposition)?.groupValues?.getOrNull(1)
+        val regularName = Regex("filename\\s*=\\s*\"?([^\";]+)\"?", RegexOption.IGNORE_CASE)
+            .find(disposition)?.groupValues?.getOrNull(1)
+        val raw = (encodedName?.let {
+            runCatching { URLDecoder.decode(it.trim(), StandardCharsets.UTF_8.name()) }.getOrNull()
+        } ?: regularName)?.trim()?.trim('"')
+            ?: Uri.parse(url).lastPathSegment?.let {
+                runCatching { URLDecoder.decode(it, StandardCharsets.UTF_8.name()) }.getOrNull()
+            }
+        return sanitizeFileName(raw)
+    }
+
+    private fun sanitizeFileName(raw: String?): String? {
+        val name = raw?.substringAfterLast('/')?.substringAfterLast('\\')
+            ?.replace(Regex("[\\u0000-\\u001F\\u007F]"), "")
+            ?.replace(Regex("[<>\"/\\\\|?*:]"), "_")
+            ?.trim()
+            ?.trim('.')
+        return name?.takeIf { it.isNotBlank() && it != "." && it != ".." }?.take(180)
+    }
+
+    private fun categoryFor(mimeType: String, extension: String): String = when {
+        mimeType.startsWith("video/") || extension in setOf("mp4", "mkv", "webm", "mov", "avi", "3gp", "m4v", "flv", "mpeg", "mpg", "ts") -> "فيديو"
+        mimeType.startsWith("audio/") || extension in setOf("mp3", "m4a", "aac", "wav", "flac", "ogg", "opus", "wma", "aiff") -> "صوت"
+        mimeType.startsWith("image/") || extension in setOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "avif", "svg") -> "صورة"
+        mimeType.contains("pdf") || extension in setOf("pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "rtf", "csv", "epub", "mobi") -> "مستند"
+        extension in setOf("zip", "rar", "7z", "tar", "gz", "bz2", "xz", "iso") -> "أرشيف"
+        else -> "ملف"
+    }
+
+    private fun mimeTypeForExtension(extension: String): String =
+        MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension.lowercase(Locale.ROOT))
+            ?: "application/octet-stream"
 
     private fun applyRequestHeaders(
         connection: HttpURLConnection,
@@ -95,20 +131,22 @@ object RealMediaDownloader {
             val contentLength: Long,
             val format: String,
             val isResumable: Boolean,
-            val server: String?
+            val server: String?,
+            val fileName: String = "CinemaX_download.bin",
+            val category: String = "ملف"
         ) : VideoVerificationResult() {
             val formattedSize: String
                 get() = if (contentLength > 0) {
                     val mb = contentLength / (1024.0 * 1024.0)
                     if (mb >= 1024) String.format(Locale.US, "%.2f جيجابايت", mb / 1024.0)
                     else String.format(Locale.US, "%.1f ميجابايت", mb)
-                } else "بث مباشر أو حجم تدفقي غير محدود"
+                } else "الحجم غير معلن من الخادم"
         }
 
         data class SocialWebPage(
             val pageUrl: String,
             val platform: String,
-            val advice: String = "هذا رابط صفحة ويب وليس ملف فيديو مباشر. افتح الصفحة في المستكشف ثم التقط ملفاً مباشراً متاحاً للتنزيل."
+            val advice: String = "هذا رابط صفحة ويب وليس ملفاً مباشراً. افتح الصفحة في المستكشف والتقط ملفاً مباشراً متاحاً إذا سمح الموقع بذلك."
         ) : VideoVerificationResult()
 
         data class Invalid(
