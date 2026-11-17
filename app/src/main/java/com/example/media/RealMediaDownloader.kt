@@ -431,19 +431,21 @@ object RealMediaDownloader {
         context: Context,
         urlStr: String,
         customFileName: String? = null,
+        mimeType: String? = null,
         requestHeaders: Map<String, String> = emptyMap()
     ): Long {
         val cleanUrl = normalizeUrl(urlStr)
         val uri = Uri.parse(cleanUrl)
 
         val ext = getExtensionFromUrl(cleanUrl)
-        val fileName = customFileName ?: "Nova_Video_${System.currentTimeMillis()}.$ext"
+        val fileName = sanitizeFileName(customFileName) ?: "CinemaX_${System.currentTimeMillis()}.$ext"
 
         val request = DownloadManager.Request(uri).apply {
-            setTitle("تحميل فيديو: $fileName")
-            setDescription("جاري تنزيل الفيديوهات والوسائط إلى المجلد العام Downloads...")
+            setTitle("تحميل ملف: $fileName")
+            setDescription("CinemaX Player — تنزيل ملف إلى مجلد Downloads")
             setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
             setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
+            mimeType?.takeIf { it.isNotBlank() }?.let { setMimeType(it) }
             addRequestHeader("User-Agent", requestHeaders.entries.firstOrNull { it.key.equals("User-Agent", true) }?.value ?: USER_AGENT_CHROME)
             addRequestHeader("Accept", requestHeaders.entries.firstOrNull { it.key.equals("Accept", true) }?.value ?: "*/*")
             requestHeaders.forEach { (name, value) ->
@@ -468,6 +470,8 @@ object RealMediaDownloader {
         context: Context,
         urlStr: String,
         requestHeaders: Map<String, String> = emptyMap(),
+        customFileName: String? = null,
+        mimeTypeHint: String? = null,
         onProgress: (DownloadProgress) -> Unit
     ) = withContext(Dispatchers.IO) {
         resetPause()
