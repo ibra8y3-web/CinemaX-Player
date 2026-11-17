@@ -25,29 +25,22 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      # v4 no longer requests Google's removed "tools" SDK package.
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
         with:
           packages: 'platform-tools'
 
-      # The app explicitly targets Android API 36.1.
       - name: Install required Android SDK packages
         run: |
-          sdkmanager --install "platforms;android-36.1" "build-tools;36.1.0"
+          sdkmanager --install "platforms;android-36.1" "build-tools;36.0.0"
 
-      - name: Set up Gradle 9.3.1
+      - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '9.3.1'
 
       - name: Ensure debug keystore exists for CI signing
         run: |
           if [ ! -f debug.keystore ]; then
-            keytool -genkey -v -keystore debug.keystore \\
-              -storepass android -alias androiddebugkey -keypass android \\
-              -keyalg RSA -keysize 2048 -validity 10000 \\
-              -dname "CN=Android Debug,O=CinemaX,C=US"
+            keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=CinemaX,C=US"
           fi
 
       - name: Run Unit & Robolectric Tests
