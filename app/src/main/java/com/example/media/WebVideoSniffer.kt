@@ -217,8 +217,19 @@ fun WebVideoSnifferDialog(
     fun scanCurrentPage() {
         val view = webViewRef ?: return
         runCatching {
-            scanWebViewForVideoSources(view) { url, mimeType ->
-                captureCandidate(url, latestPageUrl.get(), captureUserAgent, mimeType)
+            scanWebViewForVideoSources(view) { media ->
+                captureCandidate(
+                    url = media.url,
+                    pageUrl = latestPageUrl.get(),
+                    userAgent = captureUserAgent,
+                    mimeType = media.mimeType,
+                    sourceKind = media.sourceKind,
+                    width = media.width,
+                    height = media.height,
+                    durationMs = media.durationMs,
+                    currentTimeMs = media.currentTimeMs,
+                    isPlaying = media.isPlaying
+                )
             }
         }.onFailure {
             browserError = "تعذر فحص الصفحة بحثاً عن ملفات فيديو مباشرة."
@@ -487,8 +498,19 @@ fun WebVideoSnifferDialog(
                                             addressInput = url
                                         }
                                         view?.let {
-                                            scanWebViewForVideoSources(it) { mediaUrl, mimeType ->
-                                                captureCandidate(mediaUrl, latestPageUrl.get(), captureUserAgent, mimeType)
+                                            scanWebViewForVideoSources(it) { media ->
+                                                captureCandidate(
+                                                    url = media.url,
+                                                    pageUrl = latestPageUrl.get(),
+                                                    userAgent = captureUserAgent,
+                                                    mimeType = media.mimeType,
+                                                    sourceKind = media.sourceKind,
+                                                    width = media.width,
+                                                    height = media.height,
+                                                    durationMs = media.durationMs,
+                                                    currentTimeMs = media.currentTimeMs,
+                                                    isPlaying = media.isPlaying
+                                                )
                                             }
                                         }
                                     }
@@ -643,23 +665,51 @@ fun WebVideoSnifferDialog(
     )
 }
 
+private data class WebPageVideoSource(
+    val url: String,
+    val mimeType: String?,
+    val sourceKind: String,
+    val width: Int,
+    val height: Int,
+    val durationMs: Long,
+    val currentTimeMs: Long,
+    val isPlaying: Boolean
+)
+
 private fun scanWebViewForVideoSources(
     view: WebView,
-    onFound: (url: String, mimeType: String?) -> Unit
+    onFound: (WebPageVideoSource) -> Unit
 ) {
     val script = """
         (function() {
             var results = [];
-            function pushMedia(url, mimeType) {
-                if (url) results.push({ url: url, mimeType: mimeType || null });
+            function pushMedia(url, mimeType, sourceKind, video) {
+                if (!url || !/^https?:/i.test(url)) return;
+                var currentTime = Number(video.currentTime || 0);
+                var duration = Number(video.duration || 0);
+                var playing = !video.paused && !video.ended &&
+                    video.readyState >= 2 && currentTime > 0;
+                results.push({
+                    url: url,
+                    mimeType: mimeType || 'video/*',
+                    sourceKind: sourceKind,
+                    width: Number(video.videoWidth || 0),
+                    height: Number(video.videoHeight || 0),
+                    durationMs: isFinite(duration) ? Math.round(duration * 1000) : 0,
+                    currentTimeMs: isFinite(currentTime) ? Math.round(currentTime * 1000) : 0,
+                    isPlaying: playing
+                });
             }
-            document.querySelectorAll('video, audio').forEach(function(media) {
-                var tag = media.tagName.toLowerCase();
-                var fallbackMime = tag === 'audio' ? 'audio/*' : 'video/*';
-                pushMedia(media.currentSrc, fallbackMime);
-                pushMedia(media.src, fallbackMime);
-                media.querySelectorAll('source').forEach(function(source) {
-                    pushMedia(source.src, source.type || fallbackMime);
+            document.querySelectorAll('video').forEach(function(video) {
+                var activeUrl = video.currentSrc || '';
+                if (activeUrl) pushMedia(activeUrl, video.getAttribute('type') || 'video/*', 'active-video', video);
+                if (video.src && video.src !== activeUrl) {
+                    pushMedia(video.src, video.getAttribute('type') || 'video/*', 'video-source', video);
+                }
+                video.querySelectorAll('source').forEach(function(source) {
+                    if (source.src && source.src !== activeUrl && source.src !== video.src) {
+                        pushMedia(source.src, source.type || 'video/*', 'video-source', video);
+                    }
                 });
             });
             return JSON.stringify(results);
@@ -674,7 +724,19 @@ private fun scanWebViewForVideoSources(
                 val media = values.optJSONObject(index) ?: continue
                 val url = media.optString("url").takeIf { it.isNotBlank() && it != "null" } ?: continue
                 val mimeType = media.optString("mimeType").takeIf { it.isNotBlank() && it != "null" }
-                onFound(url, mimeType)
+                val sourceKind = media.optString("sourceKind", "video-source")
+                onFound(
+                    WebPageVideoSource(
+                        url = url,
+                        mimeType = mimeType,
+                        sourceKind = sourceKind,
+                        width = media.optInt("width", 0),
+                        height = media.optInt("height", 0),
+                        durationMs = media.optLong("durationMs", 0L),
+                        currentTimeMs = media.optLong("currentTimeMs", 0L),
+                        isPlaying = media.optBoolean("isPlaying", false)
+                    )
+                )
             }
         }
     }
