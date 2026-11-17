@@ -239,23 +239,68 @@ object LiveStreamRepository {
         val parsedChannels: Int,
         val importedChannels: Int,
         val alreadyPresent: Int,
-        val sourceUrl: String? = null
+        val sourceUrl: String? = null,
+        val accountStatus: String? = null
     )
 
     /**
-     * Imports every channel from M3U text, a local file's text, or an HTTP(S) playlist URL.
-     * The Room insert is awaited before the UI reports success.
+     * Imports all channels from raw M3U text, a local-file's content, or a remote
+     * M3U/M3U8 playlist URL. Optional credentials support Basic Auth and Xtream-style
+     * get.php query authentication.
      */
-    suspend fun importM3uPlaylist(input: String): M3uImportReport = withContext(Dispatchers.IO) {
-        val dao = channelDao ?: throw IllegalStateException("قائمة البث لم تتهيأ بعد. افتح شاشة التلفاز ثم أعد المحاولة.")
-        val loaded = M3uPlaylistParser.loadInput(input)
+    suspend fun importM3uPlaylist(
+        input: String,
+        username: String = "",
+        password: String = ""
+    ): M3uImportReport = withContext(Dispatchers.IO) {
+        val loaded = M3uPlaylistParser.loadInput(input, username, password)
         val parsed = M3uPlaylistParser.parse(loaded.content, loaded.sourceUrl)
+        persistImportedChannels(
+            channels = parsed,
+            sourceUrl = loaded.sourceUrl,
+            sourceLabel = "قائمة M3U"
+        )
+    }
+
+    /**
+     * Imports every live channel from an Xtream Codes-compatible provider.
+     * The provider is queried for account info, all live categories, then all live streams.
+     */
+    suspend fun importXtreamCodes(
+        server: String,
+        username: String,
+        password: String,
+        outputFormat: String = "ts"
+    ): M3uImportReport = withContext(Dispatchers.IO) {
+        val result = XtreamCodesImporter.fetchLiveChannels(
+            server = server,
+            username = username,
+            password = password,
+            outputFormat = outputFormat
+        )
+        persistImportedChannels(
+            channels = result.channels,
+            sourceUrl = server,
+            sourceLabel = "اشتراك Xtream Codes",
+            accountStatus = result.accountStatus
+        )
+    }
+
+    private suspend fun persistImportedChannels(
+        channels: List<M3uPlaylistParser.Channel>,
+        sourceUrl: String?,
+        sourceLabel: String,
+        accountStatus: String? = null
+    ): M3uImportReport {
+        val dao = channelDao
+            ?: throw IllegalStateException("قائمة البث لم تتهيأ بعد. افتح شاشة التلفاز ثم أعد المحاولة.")
+        require(channels.isNotEmpty()) { "لم يتم العثور على قنوات قابلة للاستيراد." }
+
         val timestamp = System.currentTimeMillis()
-        val entities = parsed.map { channel ->
+        val entities = channels.map { channel ->
             val details = buildList {
-                add("قناة مستوردة من قائمة M3U")
+                add("قناة مستوردة من $sourceLabel")
                 channel.tvgId?.let { add("tvg-id=$it") }
-                channel.logoUrl?.let { add("tvg-logo=$it") }
             }.joinToString(" • ")
             LiveStreamEntity(
                 id = channel.id,
@@ -267,16 +312,21 @@ object LiveStreamRepository {
                 description = details,
                 isCustom = true,
                 isHealthy = true,
-                lastCheckedTimestamp = timestamp
+                lastCheckedTimestamp = timestamp,
+                logoUrl = channel.logoUrl.orEmpty()
             )
         }
+
+        // Room returns -1 for ignored rows. This is awaited so the UI can report
+        // exact imported/duplicate counts only after the transaction has finished.
         val insertResults = dao.insertAllIgnoreAndGetIds(entities)
         val imported = insertResults.count { it != -1L }
-        M3uImportReport(
-            parsedChannels = parsed.size,
+        return M3uImportReport(
+            parsedChannels = channels.size,
             importedChannels = imported,
-            alreadyPresent = parsed.size - imported,
-            sourceUrl = loaded.sourceUrl
+            alreadyPresent = channels.size - imported,
+            sourceUrl = sourceUrl,
+            accountStatus = accountStatus
         )
     }
 

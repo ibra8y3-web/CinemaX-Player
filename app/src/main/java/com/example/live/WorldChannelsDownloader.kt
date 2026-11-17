@@ -92,7 +92,8 @@ object WorldChannelsDownloader {
                             backupUrlsString = "",
                             isHealthy = true,
                             failureCount = 0,
-                            lastCheckedTimestamp = timestamp
+                            lastCheckedTimestamp = timestamp,
+                            logoUrl = channel.logoUrl.orEmpty()
                         )
                     )
                 }
