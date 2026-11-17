@@ -494,19 +494,19 @@ fun WebVideoSnifferDialog(
 
                                     override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
                                         super.onPageStarted(view, url, favicon)
-                                        if (!url.isNullOrBlank()) {
+                                        if (!url.isNullOrBlank() && !url.equals("about:blank", ignoreCase = true)) {
                                             currentPageUrl = url
                                             latestPageUrl.set(url)
                                             addressInput = url
                                         }
                                         browserError = null
-                                        isLoadingPage = true
+                                        isLoadingPage = !url.equals("about:blank", ignoreCase = true)
                                     }
 
                                     override fun onPageFinished(view: WebView?, url: String?) {
                                         super.onPageFinished(view, url)
                                         isLoadingPage = false
-                                        if (!url.isNullOrBlank()) {
+                                        if (!url.isNullOrBlank() && !url.equals("about:blank", ignoreCase = true)) {
                                             currentPageUrl = url
                                             latestPageUrl.set(url)
                                             addressInput = url
@@ -618,6 +618,29 @@ fun WebVideoSnifferDialog(
                         },
                         modifier = Modifier.fillMaxSize()
                     )
+
+                    if (currentPageUrl.isBlank() && browserError == null) {
+                        Box(
+                            modifier = Modifier.fillMaxSize().background(Color(0xFF101633)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(
+                                modifier = Modifier.fillMaxWidth().padding(24.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Icon(Icons.Default.Language, contentDescription = null, tint = Color(0xFF22E3FF), modifier = Modifier.size(40.dp))
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Text("ابدأ برابط الموقع", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    "الصق رابط Facebook أو TikTok أو أي صفحة تريد فحصها في الأعلى، ثم اضغط زر البحث. شغّل الوسائط واضغط فحص.",
+                                    color = Color(0xFFB8C5EB),
+                                    fontSize = 11.sp,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                )
+                            }
+                        }
+                    }
 
                     browserError?.let { message ->
                         Card(
