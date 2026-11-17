@@ -119,6 +119,12 @@ fun PlayerGestureOverlay(
 
     val scope = rememberCoroutineScope()
     val latestCurrentPosMs by rememberUpdatedState(currentPosMs)
+    val latestOnSeek by rememberUpdatedState(onSeek)
+    val latestOnSeekRelative by rememberUpdatedState(onSeekRelative)
+    val latestOnToggleControls by rememberUpdatedState(onToggleControls)
+    val latestOnZoomChange by rememberUpdatedState(onZoomChange)
+    val latestOnPanChange by rememberUpdatedState(onPanChange)
+    val latestOnUnlock by rememberUpdatedState(onUnlock)
     var hideJob by remember { mutableStateOf<Job?>(null) }
 
     fun triggerHideTimer() {
@@ -175,7 +181,7 @@ fun PlayerGestureOverlay(
         if (unlockTaps >= 4) {
             unlockTaps = 0
             kidsBubbles.clear()
-            onUnlock()
+            latestOnUnlock()
         } else {
             unlockResetJob = scope.launch {
                 delay(3000)
@@ -196,13 +202,13 @@ fun PlayerGestureOverlay(
                 detectTransformGestures { _, pan, zoom, _ ->
                     if (zoom != 1.0f) {
                         val newScale = (zoomScale * zoom).coerceIn(1.0f, 3.5f)
-                        onZoomChange(newScale)
+                        latestOnZoomChange(newScale)
                     }
                     if (zoomScale > 1.05f) {
                         val newPan = panOffset + pan
-                        onPanChange(newPan)
+                        latestOnPanChange(newPan)
                     } else {
-                        onPanChange(Offset.Zero)
+                        latestOnPanChange(Offset.Zero)
                     }
                 }
             }
@@ -216,25 +222,25 @@ fun PlayerGestureOverlay(
                     )
                 } else {
                     detectTapGestures(
-                        onTap = { onToggleControls() },
+                        onTap = { latestOnToggleControls() },
                         onDoubleTap = { offset ->
                             if (zoomScale > 1.05f) {
                                 // Reset zoom on double tap
-                                onZoomChange(1.0f)
-                                onPanChange(Offset.Zero)
+                                latestOnZoomChange(1.0f)
+                                latestOnPanChange(Offset.Zero)
                             } else {
                                 val screenWidth = size.width
                                 if (offset.x < screenWidth * 0.35f) {
-                                    onSeekRelative(-10_000L)
+                                    latestOnSeekRelative(-10_000L)
                                     doubleTapFeedback = "left"
                                     triggerHideTimer()
                                 } else if (offset.x > screenWidth * 0.65f) {
-                                    onSeekRelative(10_000L)
+                                    latestOnSeekRelative(10_000L)
                                     doubleTapFeedback = "right"
                                     triggerHideTimer()
                                 } else {
                                     // Double tap center quick-zooms to 2.0x
-                                    onZoomChange(2.0f)
+                                    latestOnZoomChange(2.0f)
                                 }
                             }
                         }
@@ -258,7 +264,7 @@ fun PlayerGestureOverlay(
                     },
                     onDragEnd = {
                         if (dragMode == 3 && seekDeltaMs != 0L) {
-                            onSeek((latestCurrentPosMs + seekDeltaMs).coerceIn(0L, durationMs))
+                            latestOnSeek((latestCurrentPosMs + seekDeltaMs).coerceIn(0L, durationMs))
                         }
                         triggerHideTimer()
                     },
@@ -375,8 +381,8 @@ fun PlayerGestureOverlay(
                     .clip(RoundedCornerShape(20.dp))
                     .background(Color(0xCC000000))
                     .clickable {
-                        onZoomChange(1.0f)
-                        onPanChange(Offset.Zero)
+                        latestOnZoomChange(1.0f)
+                        latestOnPanChange(Offset.Zero)
                     }
                     .padding(horizontal = 16.dp, vertical = 8.dp)
             ) {
