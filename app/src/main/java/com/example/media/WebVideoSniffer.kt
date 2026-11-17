@@ -361,15 +361,16 @@ fun WebVideoSnifferDialog(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(max = 170.dp)
+                            .heightIn(max = 88.dp)
                             .verticalScroll(rememberScrollState())
                             .padding(bottom = 8.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Text(
-                            "تم العثور على ${capturedSources.size} مصدر محتمل. اختر الفيديو الذي تشغّله، ولا نعتمد على أول رابط تلقائيًا.",
+                            "مصادر متاحة: ${capturedSources.size} — اختر المصدر الصحيح",
                             color = Color(0xFFB8C5EB),
-                            fontSize = 10.sp
+                            fontSize = 9.sp,
+                            maxLines = 1
                         )
                         capturedSources.forEach { source ->
                             val isSelected = selectedSourceUrl == source.url
@@ -386,13 +387,13 @@ fun WebVideoSnifferDialog(
                                 ),
                                 shape = RoundedCornerShape(10.dp)
                             ) {
-                                Column(modifier = Modifier.padding(9.dp)) {
+                                Column(modifier = Modifier.padding(horizontal = 7.dp, vertical = 5.dp)) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         Icon(
                                             if (isSelected) Icons.Default.CheckCircle else Icons.Default.Download,
                                             contentDescription = null,
                                             tint = if (isSelected) Color(0xFF2EE6A6) else Color(0xFF22E3FF),
-                                            modifier = Modifier.size(19.dp)
+                                            modifier = Modifier.size(15.dp)
                                         )
                                         Spacer(modifier = Modifier.width(7.dp))
                                         Text(
@@ -404,13 +405,15 @@ fun WebVideoSnifferDialog(
                                             },
                                             color = Color.White,
                                             fontWeight = FontWeight.Bold,
-                                            fontSize = 11.sp
+                                            fontSize = 10.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
                                         )
                                         Spacer(modifier = Modifier.weight(1f))
                                         Text(
                                             if (isSelected) "محدد" else "اختيار",
                                             color = if (isSelected) Color(0xFF2EE6A6) else Color(0xFF9EABD0),
-                                            fontSize = 10.sp
+                                            fontSize = 9.sp
                                         )
                                     }
                                     if (source.width > 0 && source.height > 0) {
@@ -419,14 +422,14 @@ fun WebVideoSnifferDialog(
                                                 if (source.durationMs > 0) String.format(java.util.Locale.US, "%.0f ثانية", source.durationMs / 1000.0)
                                                 else "المدة غير معلنة",
                                             color = Color(0xFF9EABD0),
-                                            fontSize = 9.sp
+                                            fontSize = 8.sp
                                         )
                                     }
                                     Text(
-                                        source.url,
+                                        Uri.parse(source.url).host ?: "مصدر فيديو مباشر",
                                         color = Color(0xFF80CBC4),
-                                        fontSize = 9.sp,
-                                        maxLines = 2,
+                                        fontSize = 8.sp,
+                                        maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
                                 }
@@ -474,7 +477,8 @@ fun WebVideoSnifferDialog(
                                     ): Boolean {
                                         val scheme = request.url.scheme?.lowercase().orEmpty()
                                         if (scheme == "http" || scheme == "https") return false
-                                        browserError = "تم تجاهل رابط خارجي (" + scheme + "). يمكنك متابعة تشغيل الفيديو وفحص مصادره داخل المستكشف."
+                                        // Ignore app deep-links (for example fb://) without
+                                        // covering the web preview with a false page-load error.
                                         return true
                                     }
 
@@ -612,26 +616,21 @@ fun WebVideoSnifferDialog(
                             shape = RoundedCornerShape(14.dp)
                         ) {
                             Column(
-                                modifier = Modifier.padding(14.dp),
+                                modifier = Modifier.padding(8.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
                                 Icon(Icons.Default.Language, contentDescription = null, tint = Color(0xFFFFC857), modifier = Modifier.size(28.dp))
                                 Spacer(modifier = Modifier.height(8.dp))
-                                Text("تعذر عرض الصفحة داخل التطبيق", color = Color.White, fontWeight = FontWeight.Bold)
+                                Text("تعذر تحميل الصفحة", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                                 Spacer(modifier = Modifier.height(6.dp))
-                                Text(message, color = Color(0xFFD3DAF1), fontSize = 11.sp)
+                                Text(message, color = Color(0xFFD3DAF1), fontSize = 9.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                                 Spacer(modifier = Modifier.height(10.dp))
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     TextButton(onClick = { browserError = null }) {
-                                        Text("متابعة فحص الفيديو", color = Color(0xFF2EE6A6))
+                                        Text("متابعة", color = Color(0xFF2EE6A6), fontSize = 10.sp)
                                     }
-                                    Button(
-                                        onClick = { openCurrentPageExternally() },
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF22E3FF), contentColor = Color(0xFF0E1230))
-                                    ) {
-                                        Icon(Icons.Default.OpenInBrowser, contentDescription = null)
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text("فتح الصفحة خارجياً")
+                                    TextButton(onClick = { openCurrentPageExternally() }) {
+                                        Text("فتح خارجياً", color = Color(0xFF22E3FF), fontSize = 10.sp)
                                     }
                                 }
                             }
