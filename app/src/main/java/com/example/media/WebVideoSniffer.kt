@@ -43,6 +43,8 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -129,6 +131,7 @@ fun WebVideoSnifferDialog(
     var isLoadingPage by remember { mutableStateOf(true) }
     var browserError by remember { mutableStateOf<String?>(null) }
     var currentPageUrl by remember { mutableStateOf(safeInitialUrl) }
+    var addressInput by remember { mutableStateOf(safeInitialUrl) }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
 
@@ -203,6 +206,43 @@ fun WebVideoSnifferDialog(
         },
         text = {
             Column(modifier = Modifier.fillMaxWidth().height(440.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedTextField(
+                        value = addressInput,
+                        onValueChange = { addressInput = it },
+                        singleLine = true,
+                        placeholder = { Text("الصق رابط الصفحة أو الموقع") },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = Color(0xFF22E3FF),
+                            unfocusedBorderColor = Color(0xFF596080),
+                            focusedPlaceholderColor = Color(0xFFA9B4D6),
+                            unfocusedPlaceholderColor = Color(0xFFA9B4D6)
+                        ),
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(
+                        onClick = {
+                            val target = RealMediaDownloader.normalizeUrl(addressInput)
+                            if (target.startsWith("https://", true) || target.startsWith("http://", true)) {
+                                capturedSources = emptyList()
+                                currentPageUrl = target
+                                browserError = null
+                                isLoadingPage = true
+                                webViewRef?.loadUrl(target)
+                            } else {
+                                browserError = "أدخل رابط موقع يبدأ بـ https:// أو http://"
+                            }
+                        }
+                    ) {
+                        Icon(Icons.Default.Search, contentDescription = "فتح الرابط", tint = Color(0xFF22E3FF))
+                    }
+                }
+
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -302,7 +342,10 @@ fun WebVideoSnifferDialog(
 
                                     override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
                                         super.onPageStarted(view, url, favicon)
-                                        if (!url.isNullOrBlank()) currentPageUrl = url
+                                        if (!url.isNullOrBlank()) {
+                                            currentPageUrl = url
+                                            addressInput = url
+                                        }
                                         browserError = null
                                         isLoadingPage = true
                                     }
@@ -310,7 +353,10 @@ fun WebVideoSnifferDialog(
                                     override fun onPageFinished(view: WebView?, url: String?) {
                                         super.onPageFinished(view, url)
                                         isLoadingPage = false
-                                        if (!url.isNullOrBlank()) currentPageUrl = url
+                                        if (!url.isNullOrBlank()) {
+                                            currentPageUrl = url
+                                            addressInput = url
+                                        }
                                         view?.let {
                                             scanWebViewForVideoSources(it) { mediaUrl ->
                                                 captureCandidate(mediaUrl, currentPageUrl, it.settings.userAgentString)
