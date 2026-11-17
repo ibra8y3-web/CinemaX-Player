@@ -185,6 +185,13 @@ fun MusicPlayerScreen(
         viewModel.loadLocalAudioFiles()
     }
 
+    LaunchedEffect(selectedTab) {
+        if (selectedTab != 0) {
+            isSelectionMode = false
+            selectedAudioIds = emptySet()
+        }
+    }
+
     // Filter audio tracks based on search
     val filteredAudio = remember(audioFiles, searchQuery) {
         if (searchQuery.isBlank()) audioFiles
@@ -474,9 +481,6 @@ fun MusicPlayerScreen(
                     ) { Text("تحديد عدة مقاطع", fontSize = 10.sp) }
                 }
             }
-        } else {
-            isSelectionMode = false
-            selectedAudioIds = emptySet()
         }
 
         // Tab Content
