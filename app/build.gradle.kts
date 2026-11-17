@@ -19,6 +19,7 @@ android {
     targetSdk = 36
     versionCode = 1
     versionName = "1.0"
+    // Build one APK per CPU ABI instead of shipping every native runtime in one huge APK.
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     ndk {
@@ -62,6 +63,14 @@ android {
   packaging {
     jniLibs {
       useLegacyPackaging = true
+    }
+  }
+  splits {
+    abi {
+      isEnable = true
+      reset()
+      include("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
+      isUniversalApk = false
     }
   }
   testOptions { unitTests { isIncludeAndroidResources = true } }

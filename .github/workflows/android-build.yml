@@ -62,11 +62,36 @@ jobs:
             gradle :app:assembleDebug --no-daemon --stacktrace
           fi
 
-      - name: Upload Debug APK
+      - name: Upload ARM64 Debug APK
         uses: actions/upload-artifact@v7
         with:
-          name: CinemaX-Player-Debug-APK
-          path: app/build/outputs/apk/debug/*.apk
+          name: CinemaX-Player-Debug-APK-arm64-v8a
+          path: app/build/outputs/apk/debug/*arm64-v8a*.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload ARMv7 Debug APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: CinemaX-Player-Debug-APK-armeabi-v7a
+          path: app/build/outputs/apk/debug/*armeabi-v7a*.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload x86_64 Debug APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: CinemaX-Player-Debug-APK-x86_64
+          path: app/build/outputs/apk/debug/*x86_64*.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload x86 Debug APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: CinemaX-Player-Debug-APK-x86
+          path: app/build/outputs/apk/debug/*x86*.apk
+          if-no-files-found: error
           retention-days: 30
 
       - name: Upload Test Reports
