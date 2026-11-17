@@ -9,7 +9,6 @@ import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import android.webkit.MimeTypeMap
-import com.yausername.aria2c.Aria2c
 import com.yausername.ffmpeg.FFmpeg
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
@@ -74,29 +73,67 @@ object UniversalMediaEngine {
 
     private const val OUTPUT_DIRECTORY = "cinemax-ytdlp"
     @Volatile private var initialized = false
+    @Volatile private var ffmpegInitialized = false
 
     @Synchronized
     private fun ensureInitialized(context: Context) {
-        if (initialized) return
         val appContext = context.applicationContext
+        if (initialized) {
+            if (!ffmpegInitialized) {
+                ffmpegInitialized = runCatching {
+                    FFmpeg.getInstance().init(appContext)
+                    true
+                }.getOrDefault(false)
+            }
+            return
+        }
+
         try {
             YoutubeDL.getInstance().init(appContext)
-            FFmpeg.getInstance().init(appContext)
-            Aria2c.getInstance().init(appContext)
-            initialized = true
-        } catch (error: Exception) {
+        } catch (error: Throwable) {
             initialized = false
             throw IllegalStateException(
-                "تعذر تهيئة محركات استخراج المواقع. تحقق من توافق معمارية الهاتف ومساحة التخزين.",
+                "تعذر تشغيل محرك yt-dlp. تحقق من ملفات التشغيل الأصلية ومعمارية الهاتف ثم أعد تثبيت نسخة APK المناسبة.",
                 error
             )
         }
+
+        // FFmpeg is optional for single-file downloads. Its failure must not disable
+        // page analysis or downloads that already contain audio and video.
+        ffmpegInitialized = runCatching {
+            FFmpeg.getInstance().init(appContext)
+            true
+        }.getOrDefault(false)
+        initialized = true
     }
 
-    suspend fun inspect(context: Context, url: String): MediaInfo = withContext(Dispatchers.IO) {
+    private fun addRequestHeaders(
+        request: YoutubeDLRequest,
+        headers: Map<String, String>
+    ) {
+        val allowed = setOf("user-agent", "referer", "origin", "cookie", "accept", "accept-language")
+        headers.forEach { (name, value) ->
+            if (name.isNotBlank() && value.isNotBlank() &&
+                name.lowercase() in allowed &&
+                !value.contains(10.toChar()) && !value.contains(13.toChar())
+            ) {
+                request.addOption("--add-headers", "$name: $value")
+            }
+        }
+    }
+
+    suspend fun inspect(
+        context: Context,
+        url: String,
+        requestHeaders: Map<String, String> = emptyMap()
+    ): MediaInfo = withContext(Dispatchers.IO) {
         ensureInitialized(context)
         requireHttpUrl(url)
-        val info = YoutubeDL.getInstance().getInfo(url)
+        val infoRequest = YoutubeDLRequest(url).apply {
+            addOption("--no-warnings")
+            addRequestHeaders(this, requestHeaders)
+        }
+        val info = YoutubeDL.getInstance().getInfo(infoRequest)
         val formats = info.formats.orEmpty()
             .filter { !it.formatId.isNullOrBlank() && !it.ext.isNullOrBlank() }
             .distinctBy { it.formatId }
@@ -144,6 +181,7 @@ object UniversalMediaEngine {
         selectedFormat: FormatOption? = null,
         wifiOnly: Boolean = false,
         processId: String = UUID.randomUUID().toString(),
+        requestHeaders: Map<String, String> = emptyMap(),
         onProgress: (Progress) -> Unit = {}
     ): List<DownloadedFile> = withContext(Dispatchers.IO) {
         require(urls.isNotEmpty()) { "أدخل رابطاً واحداً على الأقل." }
@@ -165,29 +203,35 @@ object UniversalMediaEngine {
         request.addOption("--no-mtime")
         request.addOption("--newline")
         request.addOption("--continue")
-        request.addOption("--downloader", "libaria2c.so")
-        request.addOption("--downloader-args", "aria2c:-x16 -s16 -k1M --summary-interval=1")
+        // Keep yt-dlp native protocol handlers for broad website and manifest compatibility.
+        addRequestHeaders(request, requestHeaders)
         request.addOption(
             "-o",
             File(workDirectory, "%(title).160B [%(id)s].%(ext)s").absolutePath
         )
 
         if (audioOnly) {
+            require(ffmpegInitialized) {
+                "محرك FFmpeg غير جاهز؛ لا يمكن استخراج MP3 حالياً. أعد تثبيت التطبيق ثم جرّب مرة أخرى."
+            }
             request.addOption("-x")
             request.addOption("--audio-format", "mp3")
             request.addOption("--audio-quality", "0")
         } else {
             val selected = selectedFormat
             if (selected != null) {
-                val formatSelector = when {
-                    selected.hasVideo && !selected.hasAudio -> "${selected.formatId}+bestaudio/best"
-                    else -> selected.formatId
+                val needsMerge = selected.hasVideo && !selected.hasAudio
+                require(!needsMerge || ffmpegInitialized) {
+                    "الصيغة المختارة تحتاج إلى FFmpeg لدمج الصوت والفيديو. اختر صيغة تحتوي على صوت وصورة أو أعد تهيئة المحرك."
                 }
+                val formatSelector = if (needsMerge) "${selected.formatId}+bestaudio/best" else selected.formatId
                 request.addOption("-f", formatSelector)
-            } else {
+            } else if (ffmpegInitialized) {
                 request.addOption("-f", "bv*+ba/best")
+                request.addOption("--merge-output-format", "mkv")
+            } else {
+                request.addOption("-f", "best")
             }
-            request.addOption("--merge-output-format", "mkv")
         }
 
         val startedAt = System.currentTimeMillis()

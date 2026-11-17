@@ -90,6 +90,8 @@ data class CapturedVideoSource(
         get() = when (sourceKind) {
             "active-video", "active-audio" -> if (isPlaying) 120 else 100
             "video-source", "audio-source" -> 80
+            "hls-manifest", "dash-manifest" -> 75
+            "network-resource" -> 55
             else -> 10
         } + if (width > 0 && height > 0) 10 else 0
 }
@@ -100,40 +102,50 @@ data class CapturedVideoSource(
  */
 object WebVideoSnifferHelper {
 
+    fun isMediaManifestUrl(url: String, mimeType: String? = null): Boolean {
+        if (!url.startsWith("https://", true) && !url.startsWith("http://", true)) return false
+        val path = Uri.parse(url).path?.lowercase().orEmpty()
+        val extension = path.substringAfterLast('.', "")
+        val responseMime = mimeType?.substringBefore(';')?.trim()?.lowercase().orEmpty()
+        return extension == "m3u8" || extension == "mpd" ||
+            responseMime.contains("mpegurl") || responseMime.contains("dash+xml")
+    }
+
     fun isMediaStreamUrl(url: String, mimeType: String? = null): Boolean {
         if (!url.startsWith("https://", true) && !url.startsWith("http://", true)) return false
+        if (isMediaManifestUrl(url, mimeType)) return false
         val uri = Uri.parse(url)
         val host = uri.host?.lowercase().orEmpty()
         val path = uri.path?.lowercase().orEmpty()
-        val query = uri.encodedQuery?.lowercase().orEmpty()
+        val query = uri.encodedQuery?.lowercase().orEmpty().replace("%2f", "/")
 
         val extension = path.substringAfterLast('.', "")
-        if (extension in setOf("m3u8", "mpd")) return false
         val responseMime = mimeType?.substringBefore(';')?.trim()?.lowercase().orEmpty()
         if (responseMime.startsWith("video/") || responseMime.startsWith("audio/")) return true
         if (extension in setOf(
                 "mp4", "m4v", "webm", "mov", "mkv", "3gp", "avi", "flv",
-                "mp3", "m4a", "aac", "wav", "flac", "ogg", "opus", "wma", "aiff"
+                "mpeg", "mpg", "ts", "mp3", "m4a", "aac", "wav", "flac",
+                "ogg", "opus", "wma", "aiff"
             )
-        ) {
-            return true
-        }
-        if (query.contains("mime_type=video_mp4") || query.contains("content_type=video")) {
-            return true
-        }
+        ) return true
+        if (query.contains("mime_type=video") || query.contains("content_type=video") ||
+            query.contains("mime_type=audio") || query.contains("videoplayback")
+        ) return true
 
         val facebookCdn = host.endsWith("fbcdn.net") &&
-            path.contains("/v/") &&
+            (path.contains("/v/") || path.contains("/video/")) &&
             (query.contains("oe=") || query.contains("bytestart=") ||
                 query.contains("efg=") || query.contains("stp="))
         val instagramCdn = host.endsWith("cdninstagram.com") &&
             path.contains("/v/") &&
             (query.contains("oe=") || query.contains("stp=") || query.contains("efg="))
         val tiktokCdn = (host.contains("tiktokcdn") || host.contains("byteoversea")) &&
-            path.contains("/video/")
+            (path.contains("/video/") || query.contains("video_id="))
+        val googleVideoCdn = host.endsWith("googlevideo.com") &&
+            (path.contains("videoplayback") || query.contains("videoplayback"))
         val xCdn = host == "video.twimg.com" || host.endsWith(".video.twimg.com")
 
-        return facebookCdn || instagramCdn || tiktokCdn ||
+        return facebookCdn || instagramCdn || tiktokCdn || googleVideoCdn ||
             (xCdn && (path.contains("amplify_video") || path.contains("ext_tw_video") ||
                 path.contains("tweet_video")))
     }
@@ -181,8 +193,24 @@ fun WebVideoSnifferDialog(
         currentTimeMs: Long = 0L,
         isPlaying: Boolean = false
     ) {
-        if (!WebVideoSnifferHelper.isMediaStreamUrl(url, mimeType)) return
+        if (!url.startsWith("https://", true) && !url.startsWith("http://", true)) return
+        val isManifest = WebVideoSnifferHelper.isMediaManifestUrl(url, mimeType)
+        val isElementMedia = sourceKind == "active-video" || sourceKind == "active-audio" ||
+            sourceKind == "video-source" || sourceKind == "audio-source"
+        if (!isManifest && !isElementMedia && !WebVideoSnifferHelper.isMediaStreamUrl(url, mimeType)) return
         mainHandler.post {
+            val isDashManifest = Uri.parse(url).path.orEmpty().endsWith(".mpd", true) ||
+                mimeType?.contains("dash+xml", true) == true
+            val actualMimeType = mimeType ?: when {
+                isManifest && isDashManifest -> "application/dash+xml"
+                isManifest -> "application/vnd.apple.mpegurl"
+                else -> null
+            }
+            val actualSourceKind = when {
+                isManifest && isDashManifest -> "dash-manifest"
+                isManifest -> "hls-manifest"
+                else -> sourceKind
+            }
             val headers = linkedMapOf(
                 "User-Agent" to userAgent,
                 "Referer" to pageUrl,
@@ -197,8 +225,8 @@ fun WebVideoSnifferDialog(
                 url = url,
                 pageUrl = pageUrl,
                 requestHeaders = headers,
-                sourceKind = sourceKind,
-                mimeType = mimeType,
+                sourceKind = actualSourceKind,
+                mimeType = actualMimeType,
                 width = width,
                 height = height,
                 durationMs = durationMs,
@@ -409,6 +437,9 @@ fun WebVideoSnifferDialog(
                                                 source.isPlaying -> "الفيديو الذي يعمل الآن"
                                                 source.sourceKind == "active-audio" -> "مشغل صوت في الصفحة"
                                                 source.sourceKind == "audio-source" -> "مصدر صوت في الصفحة"
+                                                source.sourceKind == "hls-manifest" -> "قائمة بث HLS قابلة للتحليل"
+                                                source.sourceKind == "dash-manifest" -> "قائمة بث DASH قابلة للتحليل"
+                                                source.sourceKind == "network-resource" -> "ملف وسائط من طلبات الصفحة"
                                                 source.sourceKind == "active-video" -> "عنصر فيديو في الصفحة"
                                                 source.sourceKind == "video-source" -> "مصدر فيديو في الصفحة"
                                                 else -> "طلب شبكة مرشح — تحقق قبل التنزيل"
@@ -724,16 +755,17 @@ private fun scanWebViewForVideoSources(
             var results = [];
             function pushMedia(url, mimeType, sourceKind, video) {
                 if (!url || !/^https?:/i.test(url)) return;
-                var currentTime = Number(video.currentTime || 0);
-                var duration = Number(video.duration || 0);
-                var playing = !video.paused && !video.ended &&
-                    video.readyState >= 2 && currentTime > 0;
+                var mediaElement = video || {};
+                var currentTime = Number(mediaElement.currentTime || 0);
+                var duration = Number(mediaElement.duration || 0);
+                var playing = !!video && !mediaElement.paused && !mediaElement.ended &&
+                    mediaElement.readyState >= 2 && currentTime > 0;
                 results.push({
                     url: url,
-                    mimeType: mimeType || 'video/*',
+                    mimeType: mimeType || null,
                     sourceKind: sourceKind,
-                    width: Number(video.videoWidth || 0),
-                    height: Number(video.videoHeight || 0),
+                    width: Number(mediaElement.videoWidth || 0),
+                    height: Number(mediaElement.videoHeight || 0),
                     durationMs: isFinite(duration) ? Math.round(duration * 1000) : 0,
                     currentTimeMs: isFinite(currentTime) ? Math.round(currentTime * 1000) : 0,
                     isPlaying: playing
@@ -755,6 +787,34 @@ private fun scanWebViewForVideoSources(
                     }
                 });
             });
+
+            // MSE players may keep a blob: URL on the video element. Inspect browser
+            // resource history for direct files and HLS/DASH manifests instead.
+            try {
+                var entries = performance.getEntriesByType('resource') || [];
+                entries.forEach(function(entry) {
+                    var url = entry.name || '';
+                    var lower = url.toLowerCase();
+                    if (!/^https?:/i.test(url)) return;
+                    if (/\.m3u8(?:[?#]|$)/i.test(url) || /mime_type=application%2fvnd\.apple\.mpegurl/i.test(lower)) {
+                        pushMedia(url, 'application/vnd.apple.mpegurl', 'hls-manifest', null);
+                        return;
+                    }
+                    if (/\.mpd(?:[?#]|$)/i.test(url) || /dash\+xml/i.test(lower)) {
+                        pushMedia(url, 'application/dash+xml', 'dash-manifest', null);
+                        return;
+                    }
+                    if (/\.(mp4|m4v|webm|mov|mkv|3gp|avi|flv|mp3|m4a|aac|wav|flac|ogg|opus)(?:[?#]|$)/i.test(url)) {
+                        var isAudio = /\.(mp3|m4a|aac|wav|flac|ogg|opus)(?:[?#]|$)/i.test(url);
+                        pushMedia(url, isAudio ? 'audio/*' : 'video/*', 'network-resource', null);
+                        return;
+                    }
+                    if (/videoplayback|mime_type=video|content_type=video|video_url=|mime_type=audio/i.test(lower)) {
+                        var isAudio = /mime_type=audio/i.test(lower);
+                        pushMedia(url, isAudio ? 'audio/*' : 'video/*', 'network-resource', null);
+                    }
+                });
+            } catch (ignored) {}
             return JSON.stringify(results);
         })();
     """.trimIndent()

@@ -181,7 +181,10 @@ fun ToolsScreen(
     var isUpdatingUniversalEngine by remember { mutableStateOf(false) }
     var universalEngineVersionMessage by remember { mutableStateOf("") }
 
-    fun inspectWithUniversalEngine(rawUrl: String) {
+    fun inspectWithUniversalEngine(
+        rawUrl: String,
+        requestHeaders: Map<String, String> = emptyMap()
+    ) {
         val url = com.example.media.RealMediaDownloader.normalizeUrl(rawUrl)
         if (url.isBlank()) {
             Toast.makeText(context, "أدخل رابط صفحة أو ملف أولاً.", Toast.LENGTH_SHORT).show()
@@ -195,7 +198,7 @@ fun ToolsScreen(
         universalEngineVersionMessage = ""
         scope.launch {
             try {
-                val info = com.example.media.UniversalMediaEngine.inspect(context, url)
+                val info = com.example.media.UniversalMediaEngine.inspect(context, url, requestHeaders)
                 universalInfo = info
                 selectedUniversalFormat = info.formats.firstOrNull { it.hasVideo } ?: info.formats.firstOrNull()
                 if (info.formats.isEmpty()) {
@@ -214,7 +217,8 @@ fun ToolsScreen(
     fun downloadWithUniversalEngine(
         urls: List<String>,
         audioOnly: Boolean = false,
-        selectedFormat: com.example.media.UniversalMediaEngine.FormatOption? = null
+        selectedFormat: com.example.media.UniversalMediaEngine.FormatOption? = null,
+        requestHeaders: Map<String, String> = emptyMap()
     ) {
         if (isUniversalDownloading) return
         if (urls.isEmpty()) {
@@ -235,7 +239,8 @@ fun ToolsScreen(
                     audioOnly = audioOnly,
                     selectedFormat = selectedFormat,
                     wifiOnly = wifiOnlyDownloads,
-                    processId = processId
+                    processId = processId,
+                    requestHeaders = requestHeaders
                 ) { progress ->
                     scope.launch(Dispatchers.Main) {
                         universalDownloadPercent = progress.percent
@@ -1381,7 +1386,8 @@ fun ToolsScreen(
                                                 downloadWithUniversalEngine(
                                                     listOf(info.webpageUrl),
                                                     audioOnly = false,
-                                                    selectedFormat = selectedUniversalFormat
+                                                    selectedFormat = selectedUniversalFormat,
+                                                    requestHeaders = downloadRequestHeaders
                                                 )
                                             },
                                             enabled = !isUniversalDownloading,
@@ -1395,7 +1401,11 @@ fun ToolsScreen(
                                         }
                                         OutlinedButton(
                                             onClick = {
-                                                downloadWithUniversalEngine(listOf(info.webpageUrl), audioOnly = true)
+                                                downloadWithUniversalEngine(
+                                                    listOf(info.webpageUrl),
+                                                    audioOnly = true,
+                                                    requestHeaders = downloadRequestHeaders
+                                                )
                                             },
                                             enabled = !isUniversalDownloading,
                                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
@@ -1610,7 +1620,7 @@ fun ToolsScreen(
                                             val socialPage = currentVerification
                                             isDownloading = false
                                             isVerifyingUrl = false
-                                            inspectWithUniversalEngine(socialPage.pageUrl)
+                                            inspectWithUniversalEngine(socialPage.pageUrl, downloadRequestHeaders)
                                             return@launch
                                         }
 
@@ -1705,7 +1715,7 @@ fun ToolsScreen(
                                 if (links.isEmpty()) {
                                     Toast.makeText(context, "أدخل رابط موقع أو ملف HTTP/HTTPS أولاً.", Toast.LENGTH_SHORT).show()
                                 } else if (links.size == 1) {
-                                    inspectWithUniversalEngine(links.first())
+                                    inspectWithUniversalEngine(links.first(), downloadRequestHeaders)
                                 } else {
                                     downloadWithUniversalEngine(links)
                                 }
@@ -1737,7 +1747,7 @@ fun ToolsScreen(
                                                     )
                                                 ) {
                                                     is com.example.media.RealMediaDownloader.VideoVerificationResult.SocialWebPage -> {
-                                                        inspectWithUniversalEngine(check.pageUrl)
+                                                        inspectWithUniversalEngine(check.pageUrl, downloadRequestHeaders)
                                                     }
                                                     is com.example.media.RealMediaDownloader.VideoVerificationResult.Invalid -> {
                                                         Toast.makeText(context, check.reason, Toast.LENGTH_LONG).show()
@@ -1829,13 +1839,20 @@ fun ToolsScreen(
             onVideoFound = { source: com.example.media.CapturedVideoSource ->
                 downloadUrl = source.url
                 downloadRequestHeaders = source.requestHeaders
-                // This URL came from an actual HTML video element or a video-CDN
-                // request. Require the server response to prove it is a video.
-                downloadExpectedMimeType = source.mimeType ?: "video/*"
                 verificationResult = null
                 showSnifferDialog = false
                 showDownloadDialog = true
-                Toast.makeText(context, "تم التقاط رابط مباشر. افحصه ثم ابدأ التنزيل.", Toast.LENGTH_LONG).show()
+                if (com.example.media.WebVideoSnifferHelper.isMediaManifestUrl(source.url, source.mimeType)) {
+                    // HLS/DASH manifests are not single files. Let yt-dlp resolve
+                    // permitted, non-DRM streams and the formats exposed by the page.
+                    downloadExpectedMimeType = null
+                    inspectWithUniversalEngine(source.url, source.requestHeaders)
+                    Toast.makeText(context, "تم العثور على قائمة بث. جاري تحليل الصيغ المتاحة...", Toast.LENGTH_LONG).show()
+                } else {
+                    // A wildcard MIME describes the HTML element, not the actual server response.
+                    downloadExpectedMimeType = source.mimeType?.takeUnless { it.endsWith("/*") }
+                    Toast.makeText(context, "تم التقاط مصدر وسائط. افحص الرابط ثم ابدأ التنزيل.", Toast.LENGTH_LONG).show()
+                }
             },
             onDismiss = {
                 showSnifferDialog = false

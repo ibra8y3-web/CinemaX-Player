@@ -60,7 +60,11 @@ object DownloadLinkAnalyzer {
         if (value.startsWith("//")) return "https:$value"
 
         val hasScheme = Regex("^[A-Za-z][A-Za-z0-9+.-]*:").containsMatchIn(value)
-        if (!hasScheme) {
+        val looksLikeHostWithPort = Regex(
+            """^[A-Za-z0-9.-]+:\d{1,5}(?:[/#?].*)?$""",
+            RegexOption.IGNORE_CASE
+        ).matches(value)
+        if (!hasScheme || looksLikeHostWithPort) {
             val hostCandidate = value.substringBefore('/').substringBefore('?').substringBefore('#')
             if (hostCandidate.startsWith("www.", ignoreCase = true) ||
                 (hostCandidate.contains('.') && !hostCandidate.startsWith('.'))
@@ -72,11 +76,15 @@ object DownloadLinkAnalyzer {
     }
 
     fun extractUrls(text: String): List<String> {
-        val regex = Regex("https?://[^\\s<>\"']+", RegexOption.IGNORE_CASE)
+        // Accept explicit HTTP(S) links and bare domains copied from browsers.
+        // IP-address links require an explicit HTTP(S) scheme.
+        val regex = Regex(
+            """(?i)(?:https?://)?(?:www\.)?(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}(?::\d{1,5})?(?:[/?#][^\s<>"']*)?|https?://(?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?(?:[/?#][^\s<>"']*)?"""
+        )
         return regex.findAll(text)
             .map { it.value.trimEnd('.', ',', ';', ':', '!', '?', ')', ']', '}') }
             .map(::normalizeUrl)
-            .filter { it.isNotBlank() }
+            .filter { it.startsWith("https://", true) || it.startsWith("http://", true) }
             .distinct()
             .toList()
     }
@@ -120,7 +128,7 @@ object DownloadLinkAnalyzer {
                 "يبدو أن الرابط يشير إلى ملف قابل للتنزيل. سيفحص CinemaX نوع المحتوى والحجم قبل بدء التحميل."
             Route.SOCIAL_PAGE -> when (provider) {
                 Provider.YOUTUBE ->
-                    "هذا رابط صفحة YouTube وليس ملفاً مباشراً. لا يستخرج CinemaX صوت أو فيديو YouTube من رابط الصفحة؛ استخدم خيار التنزيل الرسمي المتاح في YouTube أو رابط ملف تملكه وتسمح بتنزيله."
+                    "هذا رابط صفحة YouTube وليس ملفاً مباشراً. سيحاول محرك المواقع تحليل الصيغ التي يتيحها المصدر؛ وقد لا تتاح بعض المقاطع بسبب القيود أو DRM أو تسجيل الدخول."
                 Provider.TELEGRAM ->
                     "هذا رابط Telegram. افتح المنشور إذا كان متاحاً، أو استخدم مشاركة الملف من Telegram إلى CinemaX لتنزيل نسخة أرسلها لك التطبيق."
                 else ->

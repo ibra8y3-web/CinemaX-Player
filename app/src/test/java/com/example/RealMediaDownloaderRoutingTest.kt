@@ -87,6 +87,45 @@ class RealMediaDownloaderRoutingTest {
     }
 
     @Test
+    fun sharedTextAcceptsBareDomainsAndHostPortValues() {
+        val links = com.example.media.DownloadLinkAnalyzer.extractUrls(
+            "example.com/video.mp4 and www.cdn.example.net:8443/files/movie?token=abc"
+        )
+
+        assertEquals(2, links.size)
+        assertEquals("https://example.com/video.mp4", links[0])
+        assertEquals("https://www.cdn.example.net:8443/files/movie?token=abc", links[1])
+    }
+
+    @Test
+    fun snifferRecognizesHlsAndDashManifestsForUniversalExtraction() {
+        assertTrue(
+            com.example.media.WebVideoSnifferHelper.isMediaManifestUrl(
+                "https://cdn.example.net/live/master.m3u8?token=abc"
+            )
+        )
+        assertTrue(
+            com.example.media.WebVideoSnifferHelper.isMediaManifestUrl(
+                "https://cdn.example.net/live/manifest?id=42",
+                "application/dash+xml"
+            )
+        )
+        assertFalse(
+            com.example.media.WebVideoSnifferHelper.isMediaStreamUrl(
+                "https://cdn.example.net/live/master.m3u8?token=abc"
+            )
+        )
+    }
+
+    @Test
+    fun youtubePageAdviceUsesUniversalExtractorWhenSupported() {
+        val analysis = com.example.media.DownloadLinkAnalyzer.analyze("https://youtu.be/abc123")
+        assertEquals(com.example.media.DownloadLinkAnalyzer.Route.SOCIAL_PAGE, analysis.route)
+        assertTrue(analysis.advice.contains("محرك المواقع"))
+        assertFalse(analysis.advice.contains("لا يستخرج CinemaX"))
+    }
+
+    @Test
     fun sharedTextCanContainSeveralLinks() {
         val links = com.example.media.DownloadLinkAnalyzer.extractUrls(
             "Download these: https://example.com/a.pdf and https://cdn.example.net/video.mp4"
