@@ -302,6 +302,6 @@ object M3uPlaylistParser {
     fun stableIdForUrl(url: String): String {
         val bytes = MessageDigest.getInstance("SHA-256").digest(url.toByteArray(Charsets.UTF_8))
         val hex = bytes.take(12).joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
-        return "iptv_$hex"
+        return "m3u_$hex"
     }
 }
