@@ -88,6 +88,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import coil.compose.AsyncImage
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
@@ -138,7 +141,14 @@ fun LiveStreamScreen(
     var customTitle by remember { mutableStateOf("") }
     var customUrl by remember { mutableStateOf("") }
     var customCategory by remember { mutableStateOf("بث مخصص") }
+    var m3uImportMode by remember { mutableStateOf("M3U") }
     var m3uText by remember { mutableStateOf("") }
+    var m3uUsername by remember { mutableStateOf("") }
+    var m3uPassword by remember { mutableStateOf("") }
+    var xtreamServer by remember { mutableStateOf("") }
+    var xtreamUsername by remember { mutableStateOf("") }
+    var xtreamPassword by remember { mutableStateOf("") }
+    var xtreamOutputFormat by remember { mutableStateOf("ts") }
     var isImportingM3u by remember { mutableStateOf(false) }
     var channelToDelete by remember { mutableStateOf<LiveStreamChannel?>(null) }
 
@@ -824,50 +834,167 @@ fun LiveStreamScreen(
         )
     }
 
-    // Import M3U Playlist Dialog
+    // Unified M3U/M3U8, protected playlist and Xtream Codes importer.
     if (showM3uDialog) {
         AlertDialog(
             onDismissRequest = { if (!isImportingM3u) showM3uDialog = false },
             containerColor = Color(0xFF1A1F4A),
             title = {
-                Text(text = "استيراد قائمة M3U (IPTV)", color = Color.White, fontWeight = FontWeight.Bold)
+                Text(
+                    text = "استيراد IPTV — جميع القنوات",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold
+                )
             },
             text = {
-                Column {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        text = "الصق رابط ملف M3U من الإنترنت، أو محتوى القائمة، أو اختر ملفاً من هاتفك. سيقرأ CinemaX كل القنوات ويضيفها دفعة واحدة:",
+                        "اختر طريقة الاشتراك. سيقرأ CinemaX جميع القنوات والتصنيفات والشعارات ثم يضيفها دفعة واحدة.",
                         color = Color(0xFFA9B4D6),
-                        fontSize = 12.sp,
-                        modifier = Modifier.padding(bottom = 10.dp)
+                        fontSize = 11.sp
                     )
-                    OutlinedTextField(
-                        value = m3uText,
-                        onValueChange = { m3uText = it },
-                        placeholder = {
-                            Text(
-                                "https://iptv-org.github.io/iptv/index.category.m3u\nأو الصق محتوى يبدأ بـ #EXTM3U",
-                                color = Color(0xFF8B96BD),
-                                fontSize = 11.sp
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        FilterChip(
+                            selected = m3uImportMode == "M3U",
+                            onClick = { if (!isImportingM3u) m3uImportMode = "M3U" },
+                            label = { Text("M3U / M3U8", fontSize = 11.sp) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = Color(0xFF22E3FF),
+                                selectedLabelColor = Color(0xFF0E1230)
                             )
-                        },
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White,
-                            focusedBorderColor = Color(0xFF22E3FF),
-                            unfocusedBorderColor = Color(0xFF272D66)
-                        ),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(150.dp)
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedButton(
-                        onClick = { m3uFilePicker.launch(arrayOf("*/*")) },
-                        enabled = !isImportingM3u,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("اختيار ملف M3U من الهاتف")
+                        )
+                        FilterChip(
+                            selected = m3uImportMode == "XTREAM",
+                            onClick = { if (!isImportingM3u) m3uImportMode = "XTREAM" },
+                            label = { Text("Xtream Codes", fontSize = 11.sp) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = Color(0xFF22E3FF),
+                                selectedLabelColor = Color(0xFF0E1230)
+                            )
+                        )
                     }
+
+                    if (m3uImportMode == "M3U") {
+                        Text(
+                            "الصق رابط قائمة M3U/M3U8 أو محتواها. للروابط المحمية أدخل اسم المستخدم وكلمة المرور؛ ويمكنك اختيار ملف محلي أيضاً.",
+                            color = Color(0xFFA9B4D6),
+                            fontSize = 10.sp
+                        )
+                        OutlinedTextField(
+                            value = m3uText,
+                            onValueChange = { m3uText = it },
+                            placeholder = {
+                                Text(
+                                    "https://provider.example/playlist.m3u\nأو رابط get.php?username=...&password=...",
+                                    color = Color(0xFF8B96BD),
+                                    fontSize = 10.sp
+                                )
+                            },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                focusedBorderColor = Color(0xFF22E3FF),
+                                unfocusedBorderColor = Color(0xFF272D66)
+                            ),
+                            modifier = Modifier.fillMaxWidth().height(112.dp)
+                        )
+                        OutlinedTextField(
+                            value = m3uUsername,
+                            onValueChange = { m3uUsername = it },
+                            label = { Text("اسم المستخدم (اختياري)") },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                focusedBorderColor = Color(0xFF22E3FF),
+                                unfocusedBorderColor = Color(0xFF272D66)
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        OutlinedTextField(
+                            value = m3uPassword,
+                            onValueChange = { m3uPassword = it },
+                            label = { Text("كلمة المرور (اختياري)") },
+                            singleLine = true,
+                            visualTransformation = PasswordVisualTransformation(),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                focusedBorderColor = Color(0xFF22E3FF),
+                                unfocusedBorderColor = Color(0xFF272D66)
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        OutlinedButton(
+                            onClick = { m3uFilePicker.launch(arrayOf("*/*")) },
+                            enabled = !isImportingM3u,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("اختيار ملف M3U من الهاتف")
+                        }
+                    } else {
+                        Text(
+                            "أدخل عنوان الخادم وبيانات الاشتراك. سيستخدم CinemaX واجهة Player API لجلب كل تصنيفات وقنوات البث المباشر.",
+                            color = Color(0xFFA9B4D6),
+                            fontSize = 10.sp
+                        )
+                        OutlinedTextField(
+                            value = xtreamServer,
+                            onValueChange = { xtreamServer = it },
+                            label = { Text("عنوان الخادم") },
+                            placeholder = { Text("https://provider.example:8080") },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                focusedBorderColor = Color(0xFF22E3FF),
+                                unfocusedBorderColor = Color(0xFF272D66)
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        OutlinedTextField(
+                            value = xtreamUsername,
+                            onValueChange = { xtreamUsername = it },
+                            label = { Text("اسم المستخدم") },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                focusedBorderColor = Color(0xFF22E3FF),
+                                unfocusedBorderColor = Color(0xFF272D66)
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        OutlinedTextField(
+                            value = xtreamPassword,
+                            onValueChange = { xtreamPassword = it },
+                            label = { Text("كلمة المرور") },
+                            singleLine = true,
+                            visualTransformation = PasswordVisualTransformation(),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                focusedBorderColor = Color(0xFF22E3FF),
+                                unfocusedBorderColor = Color(0xFF272D66)
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Text("صيغة رابط القناة", color = Color(0xFFA9B4D6), fontSize = 10.sp)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(
+                                selected = xtreamOutputFormat == "ts",
+                                onClick = { xtreamOutputFormat = "ts" },
+                                label = { Text("TS", fontSize = 10.sp) }
+                            )
+                            FilterChip(
+                                selected = xtreamOutputFormat == "m3u8",
+                                onClick = { xtreamOutputFormat = "m3u8" },
+                                label = { Text("M3U8", fontSize = 10.sp) }
+                            )
+                        }
+                    }
+
                     if (isImportingM3u) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             androidx.compose.material3.CircularProgressIndicator(
@@ -876,7 +1003,7 @@ fun LiveStreamScreen(
                                 color = Color(0xFF22E3FF)
                             )
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("جاري قراءة أو استيراد القائمة...", color = Color(0xFF22E3FF), fontSize = 11.sp)
+                            Text("جارٍ الاتصال وتحميل القنوات...", color = Color(0xFF22E3FF), fontSize = 11.sp)
                         }
                     }
                 }
@@ -884,15 +1011,42 @@ fun LiveStreamScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        if (m3uText.isBlank()) {
-                            Toast.makeText(context, "أدخل رابط ملف M3U أو محتوى القائمة أولاً.", Toast.LENGTH_SHORT).show()
+                        val isXtream = m3uImportMode == "XTREAM"
+                        val hasRequiredInput = if (isXtream) {
+                            xtreamServer.isNotBlank() && xtreamUsername.isNotBlank() && xtreamPassword.isNotBlank()
+                        } else {
+                            m3uText.isNotBlank()
+                        }
+
+                        if (!hasRequiredInput) {
+                            Toast.makeText(
+                                context,
+                                if (isXtream) "أدخل الخادم واسم المستخدم وكلمة المرور." else "أدخل رابط القائمة أو محتواها أولاً.",
+                                Toast.LENGTH_SHORT
+                            ).show()
                         } else {
                             isImportingM3u = true
                             importScope.launch {
                                 try {
-                                    val report = LiveStreamRepository.importM3uPlaylist(m3uText)
+                                    val report = if (isXtream) {
+                                        LiveStreamRepository.importXtreamCodes(
+                                            server = xtreamServer,
+                                            username = xtreamUsername,
+                                            password = xtreamPassword,
+                                            outputFormat = xtreamOutputFormat
+                                        )
+                                    } else {
+                                        LiveStreamRepository.importM3uPlaylist(
+                                            input = m3uText,
+                                            username = m3uUsername,
+                                            password = m3uPassword
+                                        )
+                                    }
                                     showM3uDialog = false
                                     m3uText = ""
+                                    m3uUsername = ""
+                                    m3uPassword = ""
+                                    xtreamPassword = ""
                                     Toast.makeText(
                                         context,
                                         "تمت قراءة ${report.parsedChannels} قناة وإضافة ${report.importedChannels} جديدة. المكرر الموجود: ${report.alreadyPresent}.",
@@ -901,7 +1055,7 @@ fun LiveStreamScreen(
                                 } catch (error: Exception) {
                                     Toast.makeText(
                                         context,
-                                        error.localizedMessage ?: "تعذر استيراد قائمة M3U.",
+                                        error.localizedMessage ?: "تعذر استيراد قائمة IPTV.",
                                         Toast.LENGTH_LONG
                                     ).show()
                                 } finally {
@@ -911,7 +1065,10 @@ fun LiveStreamScreen(
                         }
                     },
                     enabled = !isImportingM3u,
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF22E3FF), contentColor = Color(0xFF0E1230))
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF22E3FF),
+                        contentColor = Color(0xFF0E1230)
+                    )
                 ) {
                     if (isImportingM3u) {
                         androidx.compose.material3.CircularProgressIndicator(
@@ -920,12 +1077,18 @@ fun LiveStreamScreen(
                             color = Color(0xFF0E1230)
                         )
                     } else {
-                        Text("استيراد كل القنوات", fontWeight = FontWeight.Bold)
+                        Text(
+                            if (m3uImportMode == "XTREAM") "الاتصال واستيراد كل القنوات" else "استيراد كل القنوات",
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showM3uDialog = false }) {
+                TextButton(
+                    onClick = { if (!isImportingM3u) showM3uDialog = false },
+                    enabled = !isImportingM3u
+                ) {
                     Text("إلغاء", color = Color(0xFFA9B4D6))
                 }
             }
@@ -1050,26 +1213,38 @@ fun LiveChannelCard(
                 .padding(horizontal = 10.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Channel Category Icon
-            Box(
-                modifier = Modifier
-                    .size(52.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(com.example.ui.theme.BrandGradient),
-                contentAlignment = Alignment.Center
-            ) {
-                val icon = when (channel.iconName) {
-                    "mosque" -> Icons.Default.AutoAwesome
-                    "feed" -> Icons.Default.Feed
-                    "trending_up" -> Icons.Default.TrendingUp
-                    "tv" -> Icons.Default.Tv
-                    "child_care" -> Icons.Default.ChildCare
-                    "movie" -> Icons.Default.Movie
-                    "radio" -> Icons.Default.Radio
-                    "forest" -> Icons.Default.Forest
-                    else -> Icons.Default.LiveTv
+            // Use the real provider logo for imported channels when available.
+            if (channel.logoUrl.isNotBlank()) {
+                AsyncImage(
+                    model = channel.logoUrl,
+                    contentDescription = channel.title,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(52.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(com.example.ui.theme.BrandGradient)
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(52.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(com.example.ui.theme.BrandGradient),
+                    contentAlignment = Alignment.Center
+                ) {
+                    val icon = when (channel.iconName) {
+                        "mosque" -> Icons.Default.AutoAwesome
+                        "feed" -> Icons.Default.Feed
+                        "trending_up" -> Icons.Default.TrendingUp
+                        "tv" -> Icons.Default.Tv
+                        "child_care" -> Icons.Default.ChildCare
+                        "movie" -> Icons.Default.Movie
+                        "radio" -> Icons.Default.Radio
+                        "forest" -> Icons.Default.Forest
+                        else -> Icons.Default.LiveTv
+                    }
+                    Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(26.dp))
                 }
-                Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(26.dp))
             }
 
             Spacer(modifier = Modifier.width(10.dp))
