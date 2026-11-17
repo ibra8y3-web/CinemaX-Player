@@ -650,23 +650,26 @@ fun RadioScreen(
                                 Icon(Icons.Default.SkipPrevious, contentDescription = "السابق", tint = Color.White, modifier = Modifier.size(17.dp))
                             }
                             Spacer(modifier = Modifier.width(8.dp))
-                            if (isLoading) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(28.dp).padding(3.dp),
-                                    color = Color(0xFF22E3FF),
-                                    strokeWidth = 2.dp
-                                )
-                            } else {
-                                Button(
-                                    onClick = { radioManager.togglePlayPause() },
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = Color(0xFF22E3FF),
-                                        contentColor = Color(0xFF0E1230)
-                                    ),
-                                    shape = CircleShape,
-                                    modifier = Modifier.size(32.dp),
-                                    contentPadding = PaddingValues(0.dp)
-                                ) {
+                            Button(
+                                onClick = {
+                                    if (isLoading) radioManager.retryCurrentStation()
+                                    else radioManager.togglePlayPause()
+                                },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(0xFF22E3FF),
+                                    contentColor = Color(0xFF0E1230)
+                                ),
+                                shape = CircleShape,
+                                modifier = Modifier.size(32.dp),
+                                contentPadding = PaddingValues(0.dp)
+                            ) {
+                                if (isLoading) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(19.dp),
+                                        color = Color(0xFF0E1230),
+                                        strokeWidth = 2.dp
+                                    )
+                                } else {
                                     Icon(
                                         imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                                         contentDescription = if (isPlaying) "إيقاف" else "تشغيل",

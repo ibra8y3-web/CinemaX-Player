@@ -14,6 +14,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import com.example.media.model.LocalAudio
+import com.example.radio.RadioPlayerManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -173,6 +174,7 @@ class MusicPlayerManager private constructor(private val appContext: Context) {
     }
 
     fun playTrack(audio: LocalAudio) {
+        RadioPlayerManager.getInstance(appContext).pauseForExternalAudio()
         _currentTrack.value = audio
         _playbackError.value = null
 
@@ -205,6 +207,7 @@ class MusicPlayerManager private constructor(private val appContext: Context) {
         if (player.isPlaying) {
             player.pause()
         } else {
+            RadioPlayerManager.getInstance(appContext).pauseForExternalAudio()
             player.volume = 1.0f
             player.play()
             startMusicService()
@@ -212,10 +215,21 @@ class MusicPlayerManager private constructor(private val appContext: Context) {
     }
 
     fun play() {
+        RadioPlayerManager.getInstance(appContext).pauseForExternalAudio()
         val player = ensurePlayer()
         player.volume = 1.0f
         player.play()
         startMusicService()
+    }
+
+    /** Called by RadioPlayerManager to prevent overlapping audio sessions. */
+    fun pauseForRadioPlayback() {
+        val player = internalPlayer ?: return
+        if (player.isPlaying || player.playWhenReady) {
+            player.pause()
+            player.playWhenReady = false
+        }
+        stopProgressTracker()
     }
 
     fun pause() {
@@ -224,6 +238,7 @@ class MusicPlayerManager private constructor(private val appContext: Context) {
 
     fun stop() {
         try {
+            internalPlayer?.playWhenReady = false
             internalPlayer?.stop()
         } catch (_: Exception) {}
         _isPlaying.value = false

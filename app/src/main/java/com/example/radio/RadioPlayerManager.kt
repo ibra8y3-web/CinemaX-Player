@@ -23,6 +23,7 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import com.example.data.model.RadioCategory
 import com.example.data.model.RadioStation
+import com.example.music.MusicPlayerManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -267,11 +268,15 @@ class RadioPlayerManager(private val context: Context) {
     }
 
     fun playStation(station: RadioStation) {
+        // Keep the audio route exclusive: never leave music and radio fighting for focus.
+        MusicPlayerManager.getInstance(context).pauseForRadioPlayback()
         _currentStation.value = station
         _playbackError.value = null
         _isLoading.value = true
         isUsingBackupUrl = false
         retryCount = 0
+        autoRetryJob?.cancel()
+        wasPlayingBeforeNetworkLost = false
 
         onVideoPlaybackStarted?.invoke() // Pause video if playing
         playUrl(station.streamUrl, station)
@@ -279,31 +284,97 @@ class RadioPlayerManager(private val context: Context) {
 
     private fun playUrl(url: String, station: RadioStation) {
         initPlayer()
+        val player = exoPlayer ?: run {
+            _isLoading.value = false
+            _playbackError.value = "تعذر تهيئة مشغل الراديو. حاول مرة أخرى."
+            return
+        }
         val mediaItem = MediaItem.Builder()
             .setUri(Uri.parse(url))
             .setMediaId(station.id)
             .build()
 
-        exoPlayer?.apply {
-            volume = 1.0f
-            playWhenReady = true
-            setMediaItem(mediaItem)
-            prepare()
-            play()
+        runCatching {
+            player.volume = 1.0f
+            player.setMediaItem(mediaItem)
+            player.prepare()
+            player.playWhenReady = true
+            player.play()
+            _isLoading.value = true
+            _playbackError.value = null
+        }.onFailure { error ->
+            _isLoading.value = false
+            _isPlaying.value = false
+            _playbackError.value = "تعذر بدء المحطة: ${error.localizedMessage ?: "خطأ غير معروف"}"
         }
     }
 
-    fun togglePlayPause() {
+    /** Explicit pause used when another audio app inside CinemaX takes audio focus. */
+    fun pauseForExternalAudio() {
         val player = exoPlayer ?: return
-        if (player.isPlaying) {
+        if (player.isPlaying || player.playWhenReady) {
             player.pause()
+            player.playWhenReady = false
+        }
+        _isLoading.value = false
+        stopDataTracker()
+        updateForegroundService()
+    }
+
+    /** Explicit resume; rebuild the current item if the previous stream ended or errored. */
+    fun play() {
+        val station = _currentStation.value ?: RadioCatalog.stations.firstOrNull()
+        if (station == null) {
+            _playbackError.value = "لا توجد محطات إذاعية متاحة حالياً."
+            return
+        }
+        if (_currentStation.value == null) {
+            playStation(station)
+            return
+        }
+
+        initPlayer()
+        val player = exoPlayer ?: return
+        if (player.playbackState == Player.STATE_IDLE || player.playerError != null || player.mediaItemCount == 0) {
+            playStation(station)
+            return
+        }
+
+        MusicPlayerManager.getInstance(context).pauseForRadioPlayback()
+        player.volume = 1.0f
+        player.playWhenReady = true
+        player.play()
+        _playbackError.value = null
+        _isLoading.value = player.playbackState == Player.STATE_BUFFERING
+        startForegroundService()
+    }
+
+    fun pause() {
+        val player = exoPlayer ?: return
+        player.pause()
+        player.playWhenReady = false
+        _isLoading.value = false
+        stopDataTracker()
+        updateForegroundService()
+    }
+
+    /** Retries the selected station from a clean MediaItem instead of toggling a stale player state. */
+    fun retryCurrentStation() {
+        val station = _currentStation.value ?: RadioCatalog.stations.firstOrNull()
+        if (station != null) playStation(station)
+    }
+
+    fun togglePlayPause() {
+        val player = exoPlayer ?: run {
+            initPlayer()
+            exoPlayer
+        }
+        if (player == null) {
+            retryCurrentStation()
+        } else if (player.isPlaying) {
+            pause()
         } else {
-            if (_currentStation.value == null) {
-                // Default to Cairo Quran if nothing selected
-                RadioCatalog.stations.firstOrNull()?.let { playStation(it) }
-            } else {
-                player.play()
-            }
+            play()
         }
     }
 
@@ -331,10 +402,15 @@ class RadioPlayerManager(private val context: Context) {
 
     fun stop() {
         autoRetryJob?.cancel()
-        exoPlayer?.stop()
+        wasPlayingBeforeNetworkLost = false
+        runCatching {
+            exoPlayer?.playWhenReady = false
+            exoPlayer?.stop()
+        }
         _isPlaying.value = false
         _isLoading.value = false
         _currentStation.value = null
+        _playbackError.value = null
         stopDataTracker()
         stopForegroundService()
     }

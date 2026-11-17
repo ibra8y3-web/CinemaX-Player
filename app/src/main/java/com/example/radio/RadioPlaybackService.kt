@@ -55,12 +55,12 @@ class RadioPlaybackService : Service() {
                 startForegroundWithNotification()
             }
             ACTION_PLAY -> {
-                RadioPlayerManager.getInstance(this).togglePlayPause()
+                RadioPlayerManager.getInstance(this).play()
                 isPlaying = true
                 startForegroundWithNotification()
             }
             ACTION_PAUSE -> {
-                RadioPlayerManager.getInstance(this).togglePlayPause()
+                RadioPlayerManager.getInstance(this).pause()
                 isPlaying = false
                 startForegroundWithNotification()
             }
