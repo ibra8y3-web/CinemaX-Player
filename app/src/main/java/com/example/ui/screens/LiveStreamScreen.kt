@@ -43,6 +43,12 @@ import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Radio
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.runtime.LaunchedEffect
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.TrendingUp
@@ -105,6 +111,7 @@ fun LiveStreamScreen(
     val context = LocalContext.current
     val channels by LiveStreamRepository.channels.collectAsState()
     val favoriteIds by LiveStreamRepository.favoriteIds.collectAsState()
+    val importScope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
         LiveStreamRepository.refreshCatalog()
@@ -131,7 +138,32 @@ fun LiveStreamScreen(
     var customUrl by remember { mutableStateOf("") }
     var customCategory by remember { mutableStateOf("بث مخصص") }
     var m3uText by remember { mutableStateOf("") }
+    var isImportingM3u by remember { mutableStateOf(false) }
     var channelToDelete by remember { mutableStateOf<LiveStreamChannel?>(null) }
+
+    val m3uFilePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            importScope.launch {
+                isImportingM3u = true
+                try {
+                    val loadedText = withContext(Dispatchers.IO) {
+                        context.contentResolver.openInputStream(uri)
+                            ?.bufferedReader(Charsets.UTF_8)
+                            ?.use { it.readText() }
+                            ?: throw IllegalStateException("تعذر قراءة ملف القائمة المحدد.")
+                    }
+                    m3uText = loadedText
+                    Toast.makeText(context, "تم فتح ملف القائمة. اضغط استيراد لإضافة جميع القنوات.", Toast.LENGTH_LONG).show()
+                } catch (error: Exception) {
+                    Toast.makeText(context, error.localizedMessage ?: "تعذر فتح ملف M3U.", Toast.LENGTH_LONG).show()
+                } finally {
+                    isImportingM3u = false
+                }
+            }
+        }
+    }
 
     val countries = com.example.live.WorldChannelsDownloader.supportedCountries
 
@@ -791,7 +823,7 @@ fun LiveStreamScreen(
     // Import M3U Playlist Dialog
     if (showM3uDialog) {
         AlertDialog(
-            onDismissRequest = { showM3uDialog = false },
+            onDismissRequest = { if (!isImportingM3u) showM3uDialog = false },
             containerColor = Color(0xFF1A1F4A),
             title = {
                 Text(text = "استيراد قائمة M3U (IPTV)", color = Color.White, fontWeight = FontWeight.Bold)
@@ -799,17 +831,17 @@ fun LiveStreamScreen(
             text = {
                 Column {
                     Text(
-                        text = "الصق محتوى ملف M3U أو روابط القنوات بصيغة EXTM3U:",
+                        text = "الصق رابط ملف M3U من الإنترنت، أو محتوى القائمة، أو اختر ملفاً من هاتفك. سيقرأ CinemaX كل القنوات ويضيفها دفعة واحدة:",
                         color = Color(0xFFA9B4D6),
-                        fontSize = 13.sp,
-                        modifier = Modifier.padding(bottom = 12.dp)
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(bottom = 10.dp)
                     )
                     OutlinedTextField(
                         value = m3uText,
                         onValueChange = { m3uText = it },
                         placeholder = {
                             Text(
-                                "#EXTM3U\n#EXTINF:-1,اسم القناة\nhttp://example.com/stream.m3u8",
+                                "https://iptv-org.github.io/iptv/index.category.m3u\nأو الصق محتوى يبدأ بـ #EXTM3U",
                                 color = Color(0xFF8B96BD),
                                 fontSize = 11.sp
                             )
@@ -822,25 +854,70 @@ fun LiveStreamScreen(
                         ),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(160.dp)
+                            .height(150.dp)
                     )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = { m3uFilePicker.launch(arrayOf("*/*")) },
+                        enabled = !isImportingM3u,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("اختيار ملف M3U من الهاتف")
+                    }
+                    if (isImportingM3u) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            androidx.compose.material3.CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                                color = Color(0xFF22E3FF)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("جاري قراءة أو استيراد القائمة...", color = Color(0xFF22E3FF), fontSize = 11.sp)
+                        }
+                    }
                 }
             },
             confirmButton = {
                 Button(
                     onClick = {
-                        if (m3uText.isNotBlank()) {
-                            val count = LiveStreamRepository.importM3uPlaylist(m3uText)
-                            showM3uDialog = false
-                            m3uText = ""
-                            Toast.makeText(context, "تم استيراد $count قناة بنجاح!", Toast.LENGTH_SHORT).show()
+                        if (m3uText.isBlank()) {
+                            Toast.makeText(context, "أدخل رابط ملف M3U أو محتوى القائمة أولاً.", Toast.LENGTH_SHORT).show()
                         } else {
-                            Toast.makeText(context, "يرجى لصق محتوى القائمة أولاً", Toast.LENGTH_SHORT).show()
+                            isImportingM3u = true
+                            importScope.launch {
+                                try {
+                                    val report = LiveStreamRepository.importM3uPlaylist(m3uText)
+                                    showM3uDialog = false
+                                    m3uText = ""
+                                    Toast.makeText(
+                                        context,
+                                        "تمت قراءة ${report.parsedChannels} قناة وإضافة ${report.importedChannels} جديدة. المكرر الموجود: ${report.alreadyPresent}.",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                } catch (error: Exception) {
+                                    Toast.makeText(
+                                        context,
+                                        error.localizedMessage ?: "تعذر استيراد قائمة M3U.",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                } finally {
+                                    isImportingM3u = false
+                                }
+                            }
                         }
                     },
+                    enabled = !isImportingM3u,
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF22E3FF), contentColor = Color(0xFF0E1230))
                 ) {
-                    Text("استيراد الآن", fontWeight = FontWeight.Bold)
+                    if (isImportingM3u) {
+                        androidx.compose.material3.CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = Color(0xFF0E1230)
+                        )
+                    } else {
+                        Text("استيراد كل القنوات", fontWeight = FontWeight.Bold)
+                    }
                 }
             },
             dismissButton = {
