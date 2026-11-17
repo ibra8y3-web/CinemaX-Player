@@ -22,9 +22,6 @@ android {
     // Build one APK per CPU ABI instead of shipping every native runtime in one huge APK.
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-    ndk {
-      abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
-    }
   }
 
   signingConfigs {
