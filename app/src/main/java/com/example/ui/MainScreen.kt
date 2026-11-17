@@ -1,5 +1,6 @@
 package com.example.ui
 
+import com.example.IncomingShareRequest
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
@@ -98,7 +99,11 @@ enum class NavTab(val titleAr: String) {
 }
 
 @Composable
-fun MainScreen(viewModel: MainViewModel) {
+fun MainScreen(
+    viewModel: MainViewModel,
+    incomingShareRequest: IncomingShareRequest? = null,
+    onConsumeIncomingShare: () -> Unit = {}
+) {
     val context = LocalContext.current
     val windowSizeInfo = rememberWindowSizeInfo()
 
@@ -122,6 +127,15 @@ fun MainScreen(viewModel: MainViewModel) {
             currentTab = target
             showGateway = false
             viewModel.consumeRequestedNavTab()
+        }
+    }
+
+    LaunchedEffect(incomingShareRequest?.id) {
+        if (incomingShareRequest != null) {
+            currentTab = NavTab.TOOLS
+            showGateway = false
+            showVault = false
+            showVideoTools = false
         }
     }
 
@@ -340,7 +354,9 @@ fun MainScreen(viewModel: MainViewModel) {
                         },
                         onOpenPrayerAlarms = { viewModel.navigateToPrayerTimes(2) },
                         section = com.example.ui.screens.ToolsSection.SETTINGS,
-                        onOpenVault = { showVault = true }
+                        onOpenVault = { showVault = true },
+                        incomingShareRequest = incomingShareRequest,
+                        onConsumeIncomingShare = onConsumeIncomingShare
                     )
                 }
             }
