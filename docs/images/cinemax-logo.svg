@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+<title id="title">CinemaX Player</title>
+<desc id="desc">Cyan play symbol surrounded by a cyan ring on a midnight navy rounded square.</desc>
+<defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#171d55"/><stop offset="1" stop-color="#0b1028"/></linearGradient><linearGradient id="ring" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#22ddf5"/><stop offset=".55" stop-color="#4b8dff"/><stop offset="1" stop-color="#9d7bff"/></linearGradient></defs>
+<rect x="8" y="8" width="240" height="240" rx="54" fill="url(#bg)"/>
+<circle cx="128" cy="128" r="82" fill="none" stroke="url(#ring)" stroke-width="9"/>
+<path d="M108 78c-8-5-16 1-16 11v78c0 10 8 16 16 11l68-39c9-5 9-17 0-22z" fill="#22ddf5"/>
+<circle cx="188" cy="67" r="5" fill="#fff" opacity=".85"/>
+</svg>

@@ -1,6 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="108dp" android:height="108dp"
-    android:viewportWidth="108" android:viewportHeight="108">
-    <!-- foreground intentionally empty: the full artwork lives in the background layer -->
-    <path android:pathData="M0,0h1v1h-1z" android:fillColor="#00000000" />
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:pathData="M54,16 C74.99,16 92,33.01 92,54 C92,74.99 74.99,92 54,92 C33.01,92 16,74.99 16,54 C16,33.01 33.01,16 54,16 Z"
+        android:fillColor="#00000000"
+        android:strokeColor="#22DDF5"
+        android:strokeWidth="4" />
+    <path
+        android:pathData="M45,34.5 C42.2,33 39.5,35 39.5,38.4 L39.5,69.6 C39.5,73 42.2,75 45,73.5 L74,58 C77.3,56.2 77.3,51.8 74,50 Z"
+        android:fillColor="#22DDF5" />
+    <path
+        android:pathData="M78,26 L82,22"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2"
+        android:strokeLineCap="round" />
 </vector>
