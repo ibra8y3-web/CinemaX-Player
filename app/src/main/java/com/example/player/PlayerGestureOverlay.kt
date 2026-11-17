@@ -502,10 +502,11 @@ fun PlayerGestureOverlay(
                 }
             }
         }
-        // Draw interactive controls above the gesture surface so menu items,
-        // sliders and buttons keep their own pointer handling.
-        content()
     }
+    // Controls are a later sibling above the full-screen gesture surface.
+    // This keeps taps on the menu, scrubber, and action buttons out of the
+    // gesture detector that is only meant for the video viewport.
+    content()
 }
 
 @Composable
