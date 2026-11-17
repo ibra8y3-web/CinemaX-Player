@@ -108,7 +108,7 @@ object RealMediaDownloader {
         data class SocialWebPage(
             val pageUrl: String,
             val platform: String,
-            val advice: String = "هذا رابط صفحة ويب/سوشيال ميديا يتطلب استخراج ملف MP4 المباشر لتجنب خطأ 400. استخدم المستكشف المدمج (Web Video Sniffer) لالتقاطه فوراً بنقرة واحدة!"
+            val advice: String = "هذا رابط صفحة ويب وليس ملف فيديو مباشر. افتح الصفحة في المستكشف ثم التقط ملفاً مباشراً متاحاً للتنزيل."
         ) : VideoVerificationResult()
 
         data class Invalid(
@@ -139,8 +139,8 @@ object RealMediaDownloader {
 
     /**
      * Real Pre-Download Video Verifier:
-     * Connects to the URL, verifies MIME type, checks social media pages (Facebook, TikTok, YouTube),
-     * extracts real video format, file size, and resumability before allowing the download.
+     * Verifies direct media responses and identifies social landing pages without
+     * pretending that a page URL is itself a downloadable video file.
      */
     suspend fun verifyVideoBeforeDownload(
         urlStr: String,
@@ -449,7 +449,7 @@ object RealMediaDownloader {
             if (!isPartial && !isSuccess) {
                 conn?.disconnect()
                 val errorMsg = if (responseCode == 400) {
-                    "خطأ من السيرفر (كود 400): هذا الرابط يحتاج استخراج مباشر. استخدم المستكشف المدمج (Web Video Sniffer) لالتقاطه فوراً!"
+                    "خطأ 400: رفض الخادم الرابط. أعد فتح صفحة المصدر والتقط رابط الملف من جديد؛ قد يكون الرابط الموقّع انتهت صلاحيته."
                 } else if (responseCode == 403) {
                     "خطأ 403 (وصول مقيد): انتهت صلاحية الرابط أو أن الخادم لم يقبل جلسة المتصفح. أعد فتح الصفحة والتقاط الرابط من جديد."
                 } else {
@@ -463,7 +463,7 @@ object RealMediaDownloader {
 
             // Guard against downloading HTML pages when user wanted a direct video
             val detectedContentType = activeConn.contentType?.lowercase(Locale.ROOT) ?: ""
-            if (detectedContentType.contains("text/html") && !resolvedUrl.contains(".m3u8")) {
+            if (detectedContentType.contains("text/html")) {
                 activeConn.disconnect()
                 try { tempFile.delete() } catch (_: Exception) {}
                 onProgress(DownloadProgress(0, 0, 0, errorMsg = "الرابط يقود إلى صفحة ويب وليس ملف فيديو مباشر. افتح الصفحة في المستكشف وشغّل ملفاً مباشراً متاحاً للتنزيل."))

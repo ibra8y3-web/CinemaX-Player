@@ -1162,6 +1162,7 @@ fun ToolsScreen(
                                                                 isDownloadPaused = false
                                                                 showDownloadDialog = false
                                                                 downloadUrl = ""
+                                                                downloadRequestHeaders = emptyMap()
                                                                 downloadProgressText = ""
                                                                 downloadPercent = 0
                                                                 downloadSpeedText = ""
@@ -1248,6 +1249,7 @@ fun ToolsScreen(
                                                     isDownloadPaused = false
                                                     showDownloadDialog = false
                                                     downloadUrl = ""
+                                                    downloadRequestHeaders = emptyMap()
                                                     downloadProgressText = ""
                                                     downloadPercent = 0
                                                     downloadSpeedText = ""
@@ -1283,7 +1285,7 @@ fun ToolsScreen(
                                         var currentVerification = verificationResult
                                         if (currentVerification == null) {
                                             isVerifyingUrl = true
-                                            currentVerification = com.example.media.RealMediaDownloader.verifyVideoBeforeDownload(urlToDownload)
+                                            currentVerification = com.example.media.RealMediaDownloader.verifyVideoBeforeDownload(urlToDownload, downloadRequestHeaders)
                                             verificationResult = currentVerification
                                             isVerifyingUrl = false
                                         }
