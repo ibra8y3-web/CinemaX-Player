@@ -68,6 +68,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import org.json.JSONArray
 import org.json.JSONTokener
+import java.util.concurrent.atomic.AtomicReference
 
 data class CapturedVideoSource(
     val url: String,
@@ -136,22 +137,26 @@ fun WebVideoSnifferDialog(
     var currentPageUrl by remember { mutableStateOf(safeInitialUrl) }
     var addressInput by remember { mutableStateOf(safeInitialUrl) }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
+    // shouldInterceptRequest runs off the UI thread. These snapshots keep it
+    // from reading Compose state or WebView settings on that background thread.
+    val latestPageUrl = remember(safeInitialUrl) { AtomicReference(safeInitialUrl) }
+    val captureUserAgent = remember(context) { WebSettings.getDefaultUserAgent(context) }
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
 
     fun captureCandidate(url: String, pageUrl: String, userAgent: String) {
         if (!WebVideoSnifferHelper.isMediaStreamUrl(url)) return
-        val headers = linkedMapOf(
-            "User-Agent" to userAgent,
-            "Referer" to pageUrl,
-            "Accept" to "*/*"
-        )
-        runCatching { CookieManager.getInstance().getCookie(url) }
-            .getOrNull()
-            ?.takeIf { it.isNotBlank() }
-            ?.let { headers["Cookie"] = it }
-
-        val candidate = CapturedVideoSource(url, pageUrl, headers)
         mainHandler.post {
+            val headers = linkedMapOf(
+                "User-Agent" to userAgent,
+                "Referer" to pageUrl,
+                "Accept" to "*/*"
+            )
+            runCatching { CookieManager.getInstance().getCookie(url) }
+                .getOrNull()
+                ?.takeIf { it.isNotBlank() }
+                ?.let { headers["Cookie"] = it }
+
+            val candidate = CapturedVideoSource(url, pageUrl, headers)
             if (capturedSources.none { it.url == candidate.url }) {
                 capturedSources = (listOf(candidate) + capturedSources).take(5)
             }
@@ -162,7 +167,7 @@ fun WebVideoSnifferDialog(
         val view = webViewRef ?: return
         runCatching {
             scanWebViewForVideoSources(view) { url ->
-                captureCandidate(url, currentPageUrl, view.settings.userAgentString)
+                captureCandidate(url, latestPageUrl.get(), captureUserAgent)
             }
         }.onFailure {
             browserError = "تعذر فحص الصفحة بحثاً عن ملفات فيديو مباشرة."
@@ -239,6 +244,7 @@ fun WebVideoSnifferDialog(
                             if (target.startsWith("https://", true) || target.startsWith("http://", true)) {
                                 capturedSources = emptyList()
                                 currentPageUrl = target
+                                latestPageUrl.set(target)
                                 browserError = null
                                 isLoadingPage = true
                                 webViewRef?.loadUrl(target)
@@ -327,7 +333,7 @@ fun WebVideoSnifferDialog(
                                     useWideViewPort = true
                                     allowFileAccess = false
                                     allowContentAccess = true
-                                    userAgentString = WebSettings.getDefaultUserAgent(ctx)
+                                    userAgentString = captureUserAgent
                                 }
                                 CookieManager.getInstance().setAcceptCookie(true)
                                 CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
@@ -353,6 +359,7 @@ fun WebVideoSnifferDialog(
                                         super.onPageStarted(view, url, favicon)
                                         if (!url.isNullOrBlank()) {
                                             currentPageUrl = url
+                                            latestPageUrl.set(url)
                                             addressInput = url
                                         }
                                         browserError = null
@@ -364,11 +371,12 @@ fun WebVideoSnifferDialog(
                                         isLoadingPage = false
                                         if (!url.isNullOrBlank()) {
                                             currentPageUrl = url
+                                            latestPageUrl.set(url)
                                             addressInput = url
                                         }
                                         view?.let {
                                             scanWebViewForVideoSources(it) { mediaUrl ->
-                                                captureCandidate(mediaUrl, currentPageUrl, it.settings.userAgentString)
+                                                captureCandidate(mediaUrl, latestPageUrl.get(), captureUserAgent)
                                             }
                                         }
                                     }
@@ -381,8 +389,9 @@ fun WebVideoSnifferDialog(
                                         if (mediaUrl.isNotBlank()) {
                                             val pageReferer = request?.requestHeaders?.entries
                                                 ?.firstOrNull { it.key.equals("Referer", true) }?.value
-                                                ?: currentPageUrl
-                                            captureCandidate(mediaUrl, pageReferer, view?.settings?.userAgentString ?: WebSettings.getDefaultUserAgent(context))
+                                                ?: latestPageUrl.get()
+                                            // Do not touch view.settings here: this callback is not on the UI thread.
+                                            captureCandidate(mediaUrl, pageReferer, captureUserAgent)
                                         }
                                         return super.shouldInterceptRequest(view, request)
                                     }
@@ -390,7 +399,7 @@ fun WebVideoSnifferDialog(
                                     override fun onLoadResource(view: WebView?, url: String?) {
                                         super.onLoadResource(view, url)
                                         if (!url.isNullOrBlank()) {
-                                            captureCandidate(url, currentPageUrl, view?.settings?.userAgentString ?: WebSettings.getDefaultUserAgent(context))
+                                            captureCandidate(url, latestPageUrl.get(), captureUserAgent)
                                         }
                                     }
 
