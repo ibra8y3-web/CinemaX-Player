@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.webkit.CookieManager
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
@@ -13,6 +14,8 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.view.ViewGroup
+import android.widget.TextView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -142,7 +145,8 @@ fun WebVideoSnifferDialog(
             "Referer" to pageUrl,
             "Accept" to "*/*"
         )
-        CookieManager.getInstance().getCookie(url)
+        runCatching { CookieManager.getInstance().getCookie(url) }
+            .getOrNull()
             ?.takeIf { it.isNotBlank() }
             ?.let { headers["Cookie"] = it }
 
@@ -156,8 +160,12 @@ fun WebVideoSnifferDialog(
 
     fun scanCurrentPage() {
         val view = webViewRef ?: return
-        scanWebViewForVideoSources(view) { url ->
-            captureCandidate(url, currentPageUrl, view.settings.userAgentString)
+        runCatching {
+            scanWebViewForVideoSources(view) { url ->
+                captureCandidate(url, currentPageUrl, view.settings.userAgentString)
+            }
+        }.onFailure {
+            browserError = "تعذر فحص الصفحة بحثاً عن ملفات فيديو مباشرة."
         }
     }
 
@@ -305,7 +313,8 @@ fun WebVideoSnifferDialog(
                 ) {
                     AndroidView(
                         factory = { ctx ->
-                            WebView(ctx).apply {
+                            try {
+                                WebView(ctx).apply {
                                 webViewRef = this
                                 setBackgroundColor(android.graphics.Color.BLACK)
                                 settings.apply {
@@ -410,8 +419,43 @@ fun WebVideoSnifferDialog(
                                             isLoadingPage = false
                                         }
                                     }
+
+                                    override fun onRenderProcessGone(
+                                        view: WebView?,
+                                        detail: RenderProcessGoneDetail?
+                                    ): Boolean {
+                                        isLoadingPage = false
+                                        browserError = if (detail?.didCrash() == true) {
+                                            "تعطل محرك عرض الصفحة. لم يتم إغلاق CinemaX؛ يمكنك فتح الرابط في المتصفح الخارجي أو تجربة صفحة أخرى."
+                                        } else {
+                                            "أوقف النظام محرك عرض الصفحة لتحرير الذاكرة. يمكنك إعادة فتح الصفحة أو استخدام المتصفح الخارجي."
+                                        }
+                                        if (view != null) {
+                                            if (webViewRef === view) webViewRef = null
+                                            runCatching { (view.parent as? ViewGroup)?.removeView(view) }
+                                            runCatching { view.destroy() }
+                                        }
+                                        return true
+                                    }
                                 }
-                                loadUrl(safeInitialUrl)
+                                runCatching { loadUrl(safeInitialUrl) }
+                                    .onFailure {
+                                        browserError = "تعذر فتح الصفحة داخل المستكشف: ${it.localizedMessage ?: "خطأ WebView"}"
+                                        isLoadingPage = false
+                                    }
+                                }
+                            } catch (error: Exception) {
+                                webViewRef = null
+                                isLoadingPage = false
+                                browserError = "تعذر تشغيل المستكشف المدمج على هذا الجهاز: ${error.localizedMessage ?: "مكوّن WebView غير متاح"}"
+                                TextView(ctx).apply {
+                                    text = "تعذر تشغيل مستعرض الويب داخل التطبيق. استخدم زر فتح بالمتصفح الخارجي."
+                                    setTextColor(android.graphics.Color.WHITE)
+                                    textSize = 14f
+                                    gravity = android.view.Gravity.CENTER
+                                    setPadding(24, 24, 24, 24)
+                                    setBackgroundColor(android.graphics.Color.BLACK)
+                                }
                             }
                         },
                         modifier = Modifier.fillMaxSize()
