@@ -69,46 +69,39 @@ object WorldChannelsDownloader {
             }
 
             if (conn.responseCode == HttpURLConnection.HTTP_OK) {
-                val reader = BufferedReader(InputStreamReader(conn.inputStream))
-                var currentTitle = ""
-                var line: String?
-
-                while (reader.readLine().also { line = it } != null) {
-                    val trimmed = line?.trim() ?: continue
-                    if (trimmed.startsWith("#EXTINF:")) {
-                        // Extract Channel Title
-                        currentTitle = trimmed.substringAfterLast(",").trim()
-                    } else if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
-                        val streamUrl = trimmed
-                        if (currentTitle.isNotBlank()) {
-                            val id = "imp_${countryPreset.code}_${channels.size}_${Math.abs(currentTitle.hashCode())}"
-                            channels.add(
-                                LiveStreamEntity(
-                                    id = id,
-                                    title = currentTitle,
-                                    titleAr = "${countryPreset.flag} $currentTitle",
-                                    url = streamUrl,
-                                    category = countryPreset.categoryName,
-                                    iconName = "tv",
-                                    description = "بث مباشر رسمي من ${countryPreset.nameAr} بدقة عالية",
-                                    isCustom = true,
-                                    isFavorite = false,
-                                    backupUrlsString = "",
-                                    isHealthy = true,
-                                    failureCount = 0,
-                                    lastCheckedTimestamp = System.currentTimeMillis()
-                                )
-                            )
-                            currentTitle = ""
-                        }
-                    }
+                val content = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                val parsed = M3uPlaylistParser.parse(
+                    rawContent = content,
+                    playlistUrl = urlString,
+                    fallbackCategory = countryPreset.categoryName
+                )
+                val timestamp = System.currentTimeMillis()
+                parsed.forEachIndexed { index, channel ->
+                    val id = "imp_${countryPreset.code}_${index}_${channel.id.removePrefix("m3u_")}"
+                    channels.add(
+                        LiveStreamEntity(
+                            id = id,
+                            title = channel.title,
+                            titleAr = "${countryPreset.flag} ${channel.title}",
+                            url = channel.url,
+                            category = countryPreset.categoryName,
+                            iconName = "tv",
+                            description = "قناة مستوردة من قائمة IPTV لدولة ${countryPreset.nameAr}",
+                            isCustom = true,
+                            isFavorite = false,
+                            backupUrlsString = "",
+                            isHealthy = true,
+                            failureCount = 0,
+                            lastCheckedTimestamp = timestamp
+                        )
+                    )
                 }
-                reader.close()
 
                 if (channels.isNotEmpty()) {
-                    dao.insertAll(channels)
+                    dao.insertAllIgnore(channels)
                     onProgress(channels.size)
                 }
+            }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to download M3U for ${countryPreset.nameAr}: ${e.message}")

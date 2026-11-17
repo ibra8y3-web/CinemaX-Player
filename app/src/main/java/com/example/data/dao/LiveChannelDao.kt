@@ -25,6 +25,9 @@ interface LiveChannelDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertAllIgnore(channels: List<LiveStreamEntity>)
 
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertAllIgnoreAndGetIds(channels: List<LiveStreamEntity>): List<Long>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(channel: LiveStreamEntity)
 

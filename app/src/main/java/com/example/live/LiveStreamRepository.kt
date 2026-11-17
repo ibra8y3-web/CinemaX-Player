@@ -235,50 +235,49 @@ object LiveStreamRepository {
         deleteChannel(id)
     }
 
-    fun importM3uPlaylist(m3uContent: String): Int {
-        val dao = channelDao ?: return 0
-        val lines = m3uContent.lines()
-        var addedCount = 0
-        var currentTitle = ""
-        var currentCategory = "بث M3U المستورد"
-        val newEntities = mutableListOf<LiveStreamEntity>()
+    data class M3uImportReport(
+        val parsedChannels: Int,
+        val importedChannels: Int,
+        val alreadyPresent: Int,
+        val sourceUrl: String? = null
+    )
 
-        for (line in lines) {
-            val trimmed = line.trim()
-            if (trimmed.startsWith("#EXTINF:", ignoreCase = true)) {
-                val groupMatch = Regex("group-title=\"([^\"]+)\"", RegexOption.IGNORE_CASE).find(trimmed)
-                if (groupMatch != null) {
-                    currentCategory = groupMatch.groupValues[1]
-                }
-                currentTitle = trimmed.substringAfterLast(",").trim()
-            } else if (trimmed.startsWith("http://") || trimmed.startsWith("https://") || trimmed.startsWith("rtsp://")) {
-                if (currentTitle.isEmpty()) {
-                    currentTitle = "قناة ${addedCount + 1}"
-                }
-                val entity = LiveStreamEntity(
-                    id = "m3u_${System.currentTimeMillis()}_$addedCount",
-                    title = currentTitle,
-                    titleAr = currentTitle,
-                    url = trimmed,
-                    category = currentCategory,
-                    iconName = "tv",
-                    description = "قناة مستوردة من قائمة M3U",
-                    isCustom = true,
-                    isHealthy = true,
-                    lastCheckedTimestamp = System.currentTimeMillis()
-                )
-                newEntities.add(entity)
-                addedCount++
-                currentTitle = ""
-            }
+    /**
+     * Imports every channel from M3U text, a local file's text, or an HTTP(S) playlist URL.
+     * The Room insert is awaited before the UI reports success.
+     */
+    suspend fun importM3uPlaylist(input: String): M3uImportReport = withContext(Dispatchers.IO) {
+        val dao = channelDao ?: throw IllegalStateException("قائمة البث لم تتهيأ بعد. افتح شاشة التلفاز ثم أعد المحاولة.")
+        val loaded = M3uPlaylistParser.loadInput(input)
+        val parsed = M3uPlaylistParser.parse(loaded.content, loaded.sourceUrl)
+        val timestamp = System.currentTimeMillis()
+        val entities = parsed.map { channel ->
+            val details = buildList {
+                add("قناة مستوردة من قائمة M3U")
+                channel.tvgId?.let { add("tvg-id=$it") }
+                channel.logoUrl?.let { add("tvg-logo=$it") }
+            }.joinToString(" • ")
+            LiveStreamEntity(
+                id = channel.id,
+                title = channel.title,
+                titleAr = channel.title,
+                url = channel.url,
+                category = channel.category,
+                iconName = "tv",
+                description = details,
+                isCustom = true,
+                isHealthy = true,
+                lastCheckedTimestamp = timestamp
+            )
         }
-
-        if (newEntities.isNotEmpty()) {
-            scope.launch {
-                dao.insertAll(newEntities)
-            }
-        }
-        return addedCount
+        val insertResults = dao.insertAllIgnoreAndGetIds(entities)
+        val imported = insertResults.count { it != -1L }
+        M3uImportReport(
+            parsedChannels = parsed.size,
+            importedChannels = imported,
+            alreadyPresent = parsed.size - imported,
+            sourceUrl = loaded.sourceUrl
+        )
     }
 
     /**
