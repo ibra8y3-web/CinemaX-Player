@@ -196,7 +196,10 @@ class RadioPlayerManager(private val context: Context) {
                             startForegroundService()
                         } else {
                             stopDataTracker()
-                            updateForegroundService()
+                            // A stopped station must not recreate its notification service.
+                            if (_currentStation.value != null) {
+                                updateForegroundService()
+                            }
                         }
                     }
 
@@ -405,19 +408,51 @@ class RadioPlayerManager(private val context: Context) {
         }
     }
 
+    /**
+     * Stops playback from the UI or another in-app feature.
+     *
+     * The player is reset in place so the next station can reuse it safely.
+     * The Android service is stopped directly; sending ACTION_STOP back to the
+     * service would make its ACTION_STOP handler call this method again.
+     */
     fun stop() {
+        stopPlaybackState()
+        stopForegroundService()
+    }
+
+    /**
+     * Stops playback when ACTION_STOP came from the service notification.
+     * The service is already handling its own shutdown, so do not stop it again.
+     */
+    fun stopFromPlaybackService() {
+        stopPlaybackState()
+    }
+
+    private fun stopPlaybackState() {
         autoRetryJob?.cancel()
+        autoRetryJob = null
         wasPlayingBeforeNetworkLost = false
-        runCatching {
-            exoPlayer?.playWhenReady = false
-            exoPlayer?.stop()
-        }
+
+        sleepTimerJob?.cancel()
+        sleepTimerJob = null
+        _sleepTimerMinutes.value = 0
+        _sleepTimerRemainingSeconds.value = 0
+
+        // Clear the station before stopping ExoPlayer so its listener cannot
+        // publish a stale notification while the service is being dismissed.
+        _currentStation.value = null
         _isPlaying.value = false
         _isLoading.value = false
-        _currentStation.value = null
         _playbackError.value = null
+
+        runCatching {
+            exoPlayer?.let { player ->
+                player.playWhenReady = false
+                player.stop()
+                player.clearMediaItems()
+            }
+        }
         stopDataTracker()
-        stopForegroundService()
     }
 
     fun toggleFavorite(stationId: String) {
@@ -502,11 +537,10 @@ class RadioPlayerManager(private val context: Context) {
     }
 
     private fun stopForegroundService() {
-        val intent = Intent(context, RadioPlaybackService::class.java).apply {
-            action = RadioPlaybackService.ACTION_STOP
-        }
+        // Do not dispatch ACTION_STOP to the service: its handler calls back
+        // into this manager. Stopping the service directly avoids that loop.
         try {
-            context.startService(intent)
+            context.stopService(Intent(context, RadioPlaybackService::class.java))
         } catch (_: Exception) {}
     }
 

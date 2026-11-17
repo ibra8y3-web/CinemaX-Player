@@ -45,7 +45,7 @@ class RadioPlaybackService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val action = intent?.action ?: return START_STICKY
+        val action = intent?.action ?: return START_NOT_STICKY
 
         when (action) {
             ACTION_START, ACTION_UPDATE -> {
@@ -71,13 +71,13 @@ class RadioPlaybackService : Service() {
                 RadioPlayerManager.getInstance(this).playPrevious()
             }
             ACTION_STOP -> {
-                RadioPlayerManager.getInstance(this).stop()
+                RadioPlayerManager.getInstance(this).stopFromPlaybackService()
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
             }
         }
 
-        return START_STICKY
+        return if (action == ACTION_STOP) START_NOT_STICKY else START_STICKY
     }
 
     private fun startForegroundWithNotification() {
