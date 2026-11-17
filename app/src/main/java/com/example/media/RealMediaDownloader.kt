@@ -184,28 +184,22 @@ object RealMediaDownloader {
         urlStr: String,
         requestHeaders: Map<String, String> = emptyMap()
     ): VideoVerificationResult = withContext(Dispatchers.IO) {
-        val trimmed = normalizeUrl(urlStr)
-        val parsed = Uri.parse(trimmed)
-        if (trimmed.isBlank() ||
-            parsed.scheme?.lowercase(Locale.ROOT) !in setOf("http", "https") ||
-            parsed.host.isNullOrBlank()
-        ) {
-            return@withContext VideoVerificationResult.Invalid(
-                "الرابط غير صالح. استخدم رابطاً يبدأ بـ https:// أو http://"
-            )
-        }
+        val analysis = DownloadLinkAnalyzer.analyze(urlStr)
+        val trimmed = analysis.normalizedUrl
 
-        val platform = socialPlatformLabel(trimmed)
-        if (platform != null && !hasVideoFileExtension(trimmed)) {
-            val advice = if (platform == "YouTube") {
-                "هذا رابط صفحة YouTube وليس ملف فيديو مباشر. لا يستخرج CinemaX روابط YouTube الخاصة ولا يتجاوز DRM أو قيود المنصة. استخدم خيار التنزيل الرسمي المتاح من YouTube أو رابط ملف يتيحه مالك المحتوى."
-            } else {
-                "هذا رابط صفحة " + platform + " وليس ملف MP4. افتح الصفحة في المستكشف، وسجّل الدخول بنفسك عند الحاجة، ثم شغّل الفيديو. سيظهر فقط ملف فيديو مباشر إذا أتاحه الموقع للمتصفح دون حماية أو DRM."
-            }
+        if (analysis.route == DownloadLinkAnalyzer.Route.INVALID) {
+            return@withContext VideoVerificationResult.Invalid(analysis.advice)
+        }
+        if (analysis.route == DownloadLinkAnalyzer.Route.HLS_MANIFEST ||
+            analysis.route == DownloadLinkAnalyzer.Route.DASH_MANIFEST
+        ) {
+            return@withContext VideoVerificationResult.Invalid(analysis.advice)
+        }
+        if (analysis.route == DownloadLinkAnalyzer.Route.SOCIAL_PAGE) {
             return@withContext VideoVerificationResult.SocialWebPage(
                 pageUrl = trimmed,
-                platform = platform,
-                advice = advice
+                platform = analysis.provider?.displayName ?: "موقع ويب",
+                advice = analysis.advice
             )
         }
 
@@ -221,6 +215,7 @@ object RealMediaDownloader {
                     connectTimeout = 10_000
                     readTimeout = 10_000
                     setRequestProperty("Accept", "*/*")
+                    setRequestProperty("Range", "bytes=0-511")
                 }
                 applyRequestHeaders(active, requestHeaders, trimmed)
                 conn = active
@@ -233,11 +228,14 @@ object RealMediaDownloader {
                     if (location.isNullOrBlank()) {
                         return@withContext VideoVerificationResult.Invalid("أعاد الخادم تحويلاً بلا عنوان وجهة.")
                     }
-                    currentUrl = if (location.startsWith("http", true)) {
-                        location
-                    } else {
-                        URL(url, location).toString()
+                    val nextUrl = if (location.startsWith("http", true)) location else URL(url, location).toString()
+                    val nextScheme = Uri.parse(nextUrl).scheme?.lowercase(Locale.ROOT)
+                    if (nextScheme !in setOf("http", "https") ||
+                        (url.protocol.equals("https", true) && nextScheme != "https")
+                    ) {
+                        return@withContext VideoVerificationResult.Invalid("تم رفض تحويل غير آمن للرابط.")
                     }
+                    currentUrl = nextUrl
                     redirects++
                     continue
                 }
@@ -253,12 +251,13 @@ object RealMediaDownloader {
                 active.disconnect()
                 conn = null
                 return@withContext VideoVerificationResult.Invalid(
-                    "الخادم رفض الطلب برمز " + responseCode + ". قد يكون الرابط منتهياً أو يحتاج جلسة دخول صالحة.",
+                    "الخادم رفض الطلب برمز $responseCode. قد يكون الرابط منتهياً أو يحتاج جلسة دخول صالحة.",
                     contentType.ifBlank { null }
                 )
             }
 
-            val contentType = active.contentType?.lowercase(Locale.ROOT)?.substringBefore(';')?.trim() ?: "unknown"
+            val contentType = active.contentType?.lowercase(Locale.ROOT)?.substringBefore(';')?.trim()
+                ?.takeIf { it.isNotBlank() } ?: "application/octet-stream"
             val contentLengthHeader = active.getHeaderField("Content-Length")?.toLongOrNull() ?: -1L
             val contentRangeHeader = active.getHeaderField("Content-Range")
             val totalLength = if (!contentRangeHeader.isNullOrBlank() && contentRangeHeader.contains("/")) {
@@ -270,82 +269,107 @@ object RealMediaDownloader {
             val isResumable = (!acceptRanges.isNullOrBlank() && acceptRanges.contains("bytes", true)) ||
                 responseCode == HttpURLConnection.HTTP_PARTIAL
             val server = active.getHeaderField("Server")
+            val contentDisposition = active.getHeaderField("Content-Disposition")
+            val suggestedName = extractFileName(contentDisposition, currentUrl)
+            val extension = fileExtensionFromUrl(currentUrl)
+                ?: suggestedName?.substringAfterLast('.', "")?.takeIf { '.' in suggestedName }
+                ?: ""
+            val mimeIsPage = contentType.contains("text/html") || contentType.contains("application/xhtml")
+            val hasFileEvidence = !suggestedName.isNullOrBlank() ||
+                DownloadLinkAnalyzer.isDownloadableExtension(extension)
             active.disconnect()
             conn = null
 
-            if (contentType.contains("text/html") || contentType.contains("text/plain")) {
-                return@withContext VideoVerificationResult.Invalid(
-                    "الرابط يعرض صفحة ويب (HTML) وليس ملف فيديو. افتح رابط الصفحة في المستكشف أو استخدم رابط ملف مباشر.",
-                    contentType
-                )
-            }
-            if (contentType.contains("application/json") ||
-                (contentType.contains("application/xml") && !contentType.contains("dash+xml"))
-            ) {
-                return@withContext VideoVerificationResult.Invalid(
-                    "الرابط يعرض بيانات API/JSON وليس ملف فيديو.",
-                    contentType
-                )
+            if (mimeIsPage) {
+                val provider = analysis.provider?.displayName ?: "موقع ويب"
+                val advice = if (analysis.provider == DownloadLinkAnalyzer.Provider.YOUTUBE) {
+                    analysis.advice
+                } else {
+                    "الرابط يفتح صفحة ويب ($provider) وليس ملفاً مباشراً. افتحها في المستكشف، وسجّل الدخول بنفسك عند الحاجة، ثم اختر ملفاً مباشراً إذا أتاحه الموقع دون حماية أو DRM."
+                }
+                return@withContext VideoVerificationResult.SocialWebPage(trimmed, provider, advice)
             }
 
-            val lowerUrl = currentUrl.lowercase(Locale.ROOT)
-            val isHls = contentType.contains("mpegurl") || lowerUrl.substringBefore('?').endsWith(".m3u8")
-            val isDash = contentType.contains("dash+xml") || lowerUrl.substringBefore('?').endsWith(".mpd")
-            val knownDirectExtension = hasVideoFileExtension(currentUrl)
-            val knownVideoMime = contentType.startsWith("video/") ||
-                contentType.contains("mp4") || contentType.contains("webm") ||
-                contentType.contains("quicktime") || contentType.contains("matroska")
-            val knownMediaCdn = listOf("fbcdn.net", "cdninstagram.com", "tiktokcdn.com", "twimg.com")
-                .any { host -> (Uri.parse(currentUrl).host ?: "").lowercase(Locale.ROOT).endsWith(host) }
-            val opaqueMedia = contentType == "application/octet-stream" && (knownDirectExtension || knownMediaCdn)
-
-            if (!isHls && !isDash && !knownVideoMime && !knownDirectExtension && !opaqueMedia) {
-                return@withContext VideoVerificationResult.Invalid(
-                    "نوع المحتوى المكتشف (" + contentType + ") ليس ملف فيديو واضحاً.",
-                    contentType
-                )
-            }
-
+            val isHls = contentType.contains("mpegurl") ||
+                currentUrl.substringBefore('?').endsWith(".m3u8", true)
+            val isDash = contentType.contains("dash+xml") ||
+                currentUrl.substringBefore('?').endsWith(".mpd", true)
             if (isHls || isDash) {
                 return@withContext VideoVerificationResult.Invalid(
-                    if (isHls)
-                        "هذا رابط قائمة HLS (M3U8)، وليس ملف فيديو منفرداً. تنزيل قوائم البث وتجميع مقاطعها غير متاح في هذا الإصدار."
-                    else
-                        "هذا رابط قائمة MPEG-DASH (MPD)، وليس ملف فيديو منفرداً. تنزيل قوائم البث وتجميع مقاطعها غير متاح في هذا الإصدار.",
+                    if (isHls) {
+                        "تم التعرف على قائمة بث HLS (M3U8). يستطيع مشغل CinemaX تشغيلها، لكن تنزيل وتجميع الأجزاء غير متاح من خلال محرك الملفات المباشرة."
+                    } else {
+                        "تم التعرف على قائمة MPEG-DASH (MPD). يستطيع مشغل CinemaX تشغيلها، لكن تنزيل وتجميع الأجزاء غير متاح من خلال محرك الملفات المباشرة."
+                    },
                     contentType
                 )
             }
 
-            val format = when {
-                contentType.contains("webm") || lowerUrl.contains(".webm") -> "WebM"
-                contentType.contains("matroska") || lowerUrl.contains(".mkv") -> "MKV"
-                contentType.contains("quicktime") || lowerUrl.contains(".mov") -> "MOV"
-                contentType.contains("mp4") || lowerUrl.contains(".mp4") -> "MP4"
-                else -> "ملف فيديو مباشر (" + contentType + ")"
+            val isStructuredData = contentType.contains("application/json") ||
+                contentType.contains("application/xml") || contentType.contains("text/xml")
+            val hasKnownExtension = DownloadLinkAnalyzer.isDownloadableExtension(extension)
+            val isTextFile = contentType.startsWith("text/") && hasFileEvidence
+            if (isStructuredData && !hasFileEvidence) {
+                return@withContext VideoVerificationResult.Invalid(
+                    "الخادم أعاد بيانات API أو JSON/XML وليس ملف تنزيل واضحاً. استخدم رابط الملف أو مرفق التنزيل الأصلي.",
+                    contentType
+                )
+            }
+
+            val isKnownFileMime = contentType.startsWith("video/") ||
+                contentType.startsWith("audio/") ||
+                contentType.startsWith("image/") ||
+                contentType.startsWith("font/") ||
+                (contentType.startsWith("application/") && !isStructuredData)
+            val isOpaqueBinary = contentType == "application/octet-stream"
+            if (!isKnownFileMime && !hasKnownExtension && !isTextFile && !isOpaqueBinary) {
+                return@withContext VideoVerificationResult.Invalid(
+                    "لم يستطع الخادم تحديد نوع ملف قابل للتنزيل. نوع المحتوى: $contentType",
+                    contentType
+                )
+            }
+
+            val finalExtension = extension.ifBlank {
+                MimeTypeMap.getSingleton().getExtensionFromMimeType(contentType)?.lowercase(Locale.ROOT) ?: "bin"
+            }
+            val finalMime = if (contentType == "application/octet-stream" && finalExtension != "bin") {
+                mimeTypeForExtension(finalExtension)
+            } else contentType
+            val fileName = suggestedName
+                ?: Uri.parse(currentUrl).lastPathSegment?.let(::sanitizeFileName)
+                ?: "CinemaX_\${System.currentTimeMillis()}.$finalExtension"
+            val category = categoryFor(finalMime, finalExtension)
+            val format = if (finalExtension.isNotBlank()) {
+                finalExtension.uppercase(Locale.ROOT)
+            } else {
+                finalMime
             }
 
             VideoVerificationResult.Valid(
                 directUrl = currentUrl,
-                mimeType = if (contentType != "unknown") contentType else "video/mp4",
+                mimeType = finalMime,
                 contentLength = totalLength,
                 format = format,
                 isResumable = isResumable,
-                server = server
+                server = server,
+                fileName = fileName,
+                category = category
             )
         } catch (e: Exception) {
             conn?.disconnect()
-            val trimmedPath = Uri.parse(trimmed).path?.lowercase(Locale.ROOT).orEmpty()
-            if (hasVideoFileExtension(trimmed) &&
-                !trimmedPath.endsWith(".m3u8") &&
-                !trimmedPath.endsWith(".mpd")
-            ) {
+            val extension = fileExtensionFromUrl(trimmed)
+            if (DownloadLinkAnalyzer.isDownloadableExtension(extension)) {
+                val mimeType = mimeTypeForExtension(extension.orEmpty())
                 VideoVerificationResult.Valid(
                     directUrl = trimmed,
-                    mimeType = "video/mp4",
+                    mimeType = mimeType,
                     contentLength = -1L,
-                    format = "رابط ملف فيديو مباشر — تعذر قراءة بيانات الخادم",
+                    format = extension.orEmpty().uppercase(Locale.ROOT),
                     isResumable = false,
-                    server = null
+                    server = null,
+                    fileName = Uri.parse(trimmed).lastPathSegment?.let(::sanitizeFileName)
+                        ?: "CinemaX_\${System.currentTimeMillis()}.$extension",
+                    category = categoryFor(mimeType, extension.orEmpty())
                 )
             } else {
                 VideoVerificationResult.Invalid(
