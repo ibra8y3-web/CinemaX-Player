@@ -92,14 +92,14 @@ class RealMediaDownloaderRoutingTest {
     }
 
     @Test
-    fun webSnifferRecognizesOpaqueMediaUrlsFromResponseMimeType() {
+    fun webSnifferRecognizesOpaqueVideoUrlsButRejectsAudioAndHtml() {
         assertTrue(
             com.example.media.WebVideoSnifferHelper.isMediaStreamUrl(
                 "https://cdn.example.net/resource?id=video-123",
                 "video/mp4"
             )
         )
-        assertTrue(
+        assertFalse(
             com.example.media.WebVideoSnifferHelper.isMediaStreamUrl(
                 "https://cdn.example.net/audio?id=track-123",
                 "audio/mpeg"
