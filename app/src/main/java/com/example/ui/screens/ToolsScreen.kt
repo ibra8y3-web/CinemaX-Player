@@ -152,6 +152,12 @@ fun ToolsScreen(
     val soundPreset by prefsManager.soundPreset.collectAsState()
     val language by prefsManager.language.collectAsState()
     val isAutoPlayEnabled by playerManager.isAutoPlayEnabled.collectAsState()
+    val downloadPreferences = remember(context) {
+        context.getSharedPreferences("cinemax_download_preferences", Context.MODE_PRIVATE)
+    }
+    var wifiOnlyDownloads by remember {
+        mutableStateOf(downloadPreferences.getBoolean("wifi_only_downloads", false))
+    }
 
     var showDuasScreen by remember { mutableStateOf(false) }
     var showDownloadDialog by remember { mutableStateOf(false) }
@@ -160,7 +166,6 @@ fun ToolsScreen(
     var downloadExpectedMimeType by remember { mutableStateOf<String?>(null) }
     var isDownloading by remember { mutableStateOf(false) }
     var showSnifferDialog by remember { mutableStateOf(false) }
-    var returnToDownloadAfterSniffer by remember { mutableStateOf(false) }
     var showDuplicateCleanerDialog by remember { mutableStateOf(false) }
 
     // Audio Extractor Tool States
@@ -271,6 +276,67 @@ fun ToolsScreen(
                 }
             )
             Spacer(modifier = Modifier.height(12.dp))
+            ToolCard(
+                icon = Icons.Default.Wifi,
+                iconTint = Color(0xFF22E3FF),
+                title = "حماية التنزيلات",
+                subtitle = if (wifiOnlyDownloads) "التنزيل عبر Wi-Fi فقط — بيانات الهاتف متوقفة"
+                    else "السماح بالتنزيل عبر Wi-Fi وبيانات الهاتف",
+                action = {
+                    Switch(
+                        checked = wifiOnlyDownloads,
+                        onCheckedChange = { enabled ->
+                            wifiOnlyDownloads = enabled
+                            downloadPreferences.edit().putBoolean("wifi_only_downloads", enabled).apply()
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color(0xFF2EE6A6),
+                            checkedTrackColor = Color(0xFF245E54)
+                        ),
+                        modifier = Modifier.testTag("download_wifi_only_switch")
+                    )
+                }
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            ToolCard(
+                icon = Icons.Default.CloudDownload,
+                iconTint = Color(0xFF2EE6A6),
+                title = "مركز التنزيل",
+                subtitle = "تنزيل الملفات المباشرة، متابعة السرعة والحجم، واستئناف التنزيلات المتقطعة",
+                action = {
+                    Button(
+                        onClick = { showDownloadDialog = true },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2EE6A6), contentColor = Color(0xFF0E1230)),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.testTag("open_downloader_button")
+                    ) {
+                        Text("فتح التنزيلات", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
+                }
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            ToolCard(
+                icon = Icons.Default.Language,
+                iconTint = Color(0xFF22E3FF),
+                title = "مستكشف الفيديو",
+                subtitle = "افتح صفحة الويب، شغّل الفيديو، واختر المصدر المباشر المتاح مع معاينة أكبر",
+                action = {
+                    Button(
+                        onClick = {
+                            downloadUrl = ""
+                            downloadRequestHeaders = emptyMap()
+                            downloadExpectedMimeType = null
+                            showSnifferDialog = true
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF22E3FF), contentColor = Color(0xFF0E1230)),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.testTag("open_sniffer_card_btn")
+                    ) {
+                        Text("فتح المستكشف", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
+                }
+            )
+            Spacer(modifier = Modifier.height(12.dp))
         }
 
         // Tool: Full APK Share directly inside the app
@@ -369,28 +435,6 @@ fun ToolsScreen(
                         shape = RoundedCornerShape(8.dp)
                     ) {
                         Text("فتح الأدعية 🤲", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                    }
-                }
-            )
-        }
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        // Tool 2: Direct Video Downloader
-        if (section == ToolsSection.ALL || section == ToolsSection.VIDEO) {
-            ToolCard(
-                icon = Icons.Default.CloudDownload,
-                iconTint = Color(0xFF2EE6A6),
-                title = "التحميل المباشر وحفظ المحتوى دون اتصال",
-                subtitle = "تنزيل ملفات الفيديو المباشرة المدعومة وحفظها في الجهاز",
-                action = {
-                    Button(
-                        onClick = { showDownloadDialog = true },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2EE6A6), contentColor = Color(0xFF0E1230)),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.testTag("open_downloader_button")
-                    ) {
-                        Text("تنزيل", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     }
                 }
             )
@@ -604,28 +648,6 @@ fun ToolsScreen(
                         modifier = Modifier.testTag("open_audio_remover_btn")
                     ) {
                         Text("كتم الصوت", fontWeight = FontWeight.Bold, fontSize = 11.sp)
-                    }
-                }
-            )
-        }
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        // Tool 12: Web Video Sniffer & Stream Grabber
-        if (section == ToolsSection.ALL || section == ToolsSection.VIDEO) {
-            ToolCard(
-                icon = Icons.Default.Language,
-                iconTint = Color(0xFF22E3FF),
-                title = "المستكشف الذكي لالتقاط وتنزيل فيديوهات الويب (Web Video Sniffer)",
-                subtitle = "تصفح صفحات الويب، ثم التقاط ملفات الفيديو المباشرة التي يتيحها الموقع للمتصفح مع بيانات الجلسة عند توفرها",
-                action = {
-                    Button(
-                        onClick = { showSnifferDialog = true },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF22E3FF), contentColor = Color(0xFF0E1230)),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.testTag("open_sniffer_card_btn")
-                    ) {
-                        Text("المستكشف 🌐", fontWeight = FontWeight.Bold, fontSize = 11.sp)
                     }
                 }
             )
