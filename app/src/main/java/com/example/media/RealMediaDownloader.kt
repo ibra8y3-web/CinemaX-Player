@@ -6,6 +6,8 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.provider.OpenableColumns
 import android.os.Build
 import android.os.Environment
@@ -198,6 +200,16 @@ object RealMediaDownloader {
         val failures: List<String>
     )
 
+    private fun isWifiNetworkActive(context: Context): Boolean {
+        return runCatching {
+            val manager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+                ?: return false
+            val network = manager.activeNetwork ?: return false
+            val capabilities = manager.getNetworkCapabilities(network) ?: return false
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+        }.getOrDefault(false)
+    }
+
     /**
      * Validates and enqueues multiple direct HTTP files with Android DownloadManager.
      * Web pages and protected platform URLs are never enqueued as if they were files.
@@ -205,7 +217,8 @@ object RealMediaDownloader {
     suspend fun enqueueDownloadQueue(
         context: Context,
         rawLinks: List<String>,
-        requestHeaders: Map<String, String> = emptyMap()
+        requestHeaders: Map<String, String> = emptyMap(),
+        wifiOnly: Boolean = false
     ): DownloadQueueResult = withContext(Dispatchers.IO) {
         var queued = 0
         var skippedPages = 0
@@ -221,7 +234,8 @@ object RealMediaDownloader {
                             urlStr = result.directUrl,
                             customFileName = result.fileName,
                             mimeType = result.mimeType,
-                            requestHeaders = requestHeaders
+                            requestHeaders = requestHeaders,
+                            wifiOnly = wifiOnly
                         )
                     }.onSuccess { queued++ }
                         .onFailure { error ->
@@ -553,7 +567,8 @@ object RealMediaDownloader {
         urlStr: String,
         customFileName: String? = null,
         mimeType: String? = null,
-        requestHeaders: Map<String, String> = emptyMap()
+        requestHeaders: Map<String, String> = emptyMap(),
+        wifiOnly: Boolean = false
     ): Long {
         val cleanUrl = normalizeUrl(urlStr)
         val uri = Uri.parse(cleanUrl)
@@ -588,8 +603,8 @@ object RealMediaDownloader {
                     addRequestHeader(name, value)
                 }
             }
-            setAllowedOverRoaming(true)
-            setAllowedOverMetered(true)
+            setAllowedOverRoaming(!wifiOnly)
+            setAllowedOverMetered(!wifiOnly)
         }
 
         val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
@@ -605,8 +620,20 @@ object RealMediaDownloader {
         requestHeaders: Map<String, String> = emptyMap(),
         customFileName: String? = null,
         mimeTypeHint: String? = null,
+        wifiOnly: Boolean = false,
         onProgress: (DownloadProgress) -> Unit
     ) = withContext(Dispatchers.IO) {
+        if (wifiOnly && !isWifiNetworkActive(context)) {
+            onProgress(
+                DownloadProgress(
+                    bytesDownloaded = 0,
+                    totalBytes = 0,
+                    percent = 0,
+                    errorMsg = "التنزيل مضبوط على Wi-Fi فقط. اتصل بشبكة Wi-Fi أو أوقف هذا الخيار من الإعدادات."
+                )
+            )
+            return@withContext
+        }
         resetPause()
         try {
             val normalizedUrl = normalizeUrl(urlStr)
@@ -614,7 +641,7 @@ object RealMediaDownloader {
             val url = URL(resolvedUrl)
 
             // Temp file for Range Request Resume support
-            val safeKey = Math.abs(normalizedUrl.hashCode())
+            val safeKey = Integer.toHexString(normalizedUrl.hashCode())
             val tempFile = File(context.cacheDir, "nova_dl_$safeKey.tmp")
             var existingBytes = if (tempFile.exists()) tempFile.length() else 0L
 
