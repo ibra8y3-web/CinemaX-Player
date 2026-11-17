@@ -35,9 +35,9 @@
 
 <div align="center">
 
-| بوابة الدخول والأقسام | مشغّل الفيديو وأدوات التحكم |
+| مشغّل الفيديو وأدوات التحكم | مشغّل الفيديو أثناء التشغيل |
 |:---:|:---:|
-| <img src="docs/screenshots/welcome-gateway.jpg" alt="بوابة الدخول والأقسام الرئيسية" width="190" /> | <img src="docs/screenshots/video-player-controls.jpg" alt="مشغّل الفيديو وعناصر التحكم" width="190" /> |
+| <img src="docs/screenshots/video-player-controls.jpg" alt="مشغّل الفيديو وعناصر التحكم" width="190" /> | <img src="docs/screenshots/player-playback.jpg" alt="واجهة تشغيل الفيديو" width="190" /> |
 
 </div>
 
