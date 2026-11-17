@@ -17,6 +17,9 @@ import android.webkit.WebViewClient
 import android.view.ViewGroup
 import android.widget.TextView
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,6 +28,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -73,8 +77,22 @@ import java.util.concurrent.atomic.AtomicReference
 data class CapturedVideoSource(
     val url: String,
     val pageUrl: String,
-    val requestHeaders: Map<String, String>
-)
+    val requestHeaders: Map<String, String>,
+    val sourceKind: String = "network",
+    val mimeType: String? = null,
+    val width: Int = 0,
+    val height: Int = 0,
+    val durationMs: Long = 0L,
+    val currentTimeMs: Long = 0L,
+    val isPlaying: Boolean = false
+) {
+    val confidenceScore: Int
+        get() = when (sourceKind) {
+            "active-video" -> if (isPlaying) 120 else 100
+            "video-source" -> 80
+            else -> 10
+        } + if (width > 0 && height > 0) 10 else 0
+}
 
 /**
  * Captures direct, unencrypted video files exposed by the page to Android WebView.
@@ -92,7 +110,7 @@ object WebVideoSnifferHelper {
         val extension = path.substringAfterLast('.', "")
         if (extension in setOf("m3u8", "mpd")) return false
         val responseMime = mimeType?.substringBefore(';')?.trim()?.lowercase().orEmpty()
-        if (responseMime.startsWith("video/") || responseMime.startsWith("audio/")) return true
+        if (responseMime.startsWith("video/")) return true
         if (extension in setOf("mp4", "m4v", "webm", "mov", "mkv", "3gp", "avi", "flv")) {
             return true
         }
@@ -135,6 +153,7 @@ fun WebVideoSnifferDialog(
     }
 
     var capturedSources by remember { mutableStateOf<List<CapturedVideoSource>>(emptyList()) }
+    var selectedSourceUrl by remember { mutableStateOf<String?>(null) }
     var isLoadingPage by remember { mutableStateOf(true) }
     var browserError by remember { mutableStateOf<String?>(null) }
     var currentPageUrl by remember { mutableStateOf(safeInitialUrl) }
@@ -146,7 +165,18 @@ fun WebVideoSnifferDialog(
     val captureUserAgent = remember(context) { WebSettings.getDefaultUserAgent(context) }
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
 
-    fun captureCandidate(url: String, pageUrl: String, userAgent: String, mimeType: String? = null) {
+    fun captureCandidate(
+        url: String,
+        pageUrl: String,
+        userAgent: String,
+        mimeType: String? = null,
+        sourceKind: String = "network",
+        width: Int = 0,
+        height: Int = 0,
+        durationMs: Long = 0L,
+        currentTimeMs: Long = 0L,
+        isPlaying: Boolean = false
+    ) {
         if (!WebVideoSnifferHelper.isMediaStreamUrl(url, mimeType)) return
         mainHandler.post {
             val headers = linkedMapOf(
@@ -159,9 +189,27 @@ fun WebVideoSnifferDialog(
                 ?.takeIf { it.isNotBlank() }
                 ?.let { headers["Cookie"] = it }
 
-            val candidate = CapturedVideoSource(url, pageUrl, headers)
-            if (capturedSources.none { it.url == candidate.url }) {
-                capturedSources = (listOf(candidate) + capturedSources).take(5)
+            val candidate = CapturedVideoSource(
+                url = url,
+                pageUrl = pageUrl,
+                requestHeaders = headers,
+                sourceKind = sourceKind,
+                mimeType = mimeType,
+                width = width,
+                height = height,
+                durationMs = durationMs,
+                currentTimeMs = currentTimeMs,
+                isPlaying = isPlaying
+            )
+            val existing = capturedSources.firstOrNull { it.url == candidate.url }
+            if (existing == null || candidate.confidenceScore >= existing.confidenceScore) {
+                val updated = (capturedSources.filterNot { it.url == candidate.url } + candidate)
+                    .sortedByDescending { it.confidenceScore }
+                    .take(10)
+                capturedSources = updated
+                if (selectedSourceUrl == null || updated.firstOrNull()?.url == candidate.url) {
+                    selectedSourceUrl = updated.firstOrNull()?.url
+                }
             }
         }
     }
@@ -246,6 +294,7 @@ fun WebVideoSnifferDialog(
                             val target = RealMediaDownloader.normalizeUrl(addressInput)
                             if (target.startsWith("https://", true) || target.startsWith("http://", true)) {
                                 capturedSources = emptyList()
+                                selectedSourceUrl = null
                                 currentPageUrl = target
                                 latestPageUrl.set(target)
                                 browserError = null
@@ -298,18 +347,78 @@ fun WebVideoSnifferDialog(
                 }
 
                 if (capturedSources.isNotEmpty()) {
-                    val selected = capturedSources.first()
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = Color(0xFF132E27)),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 170.dp)
+                            .verticalScroll(rememberScrollState())
+                            .padding(bottom = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF2EE6A6), modifier = Modifier.size(24.dp))
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("تم العثور على ملف فيديو مباشر", color = Color(0xFF2EE6A6), fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                                Text(selected.url, color = Color(0xFF80CBC4), fontSize = 10.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            "تم العثور على ${capturedSources.size} مصدر محتمل. اختر الفيديو الذي تشغّله، ولا نعتمد على أول رابط تلقائيًا.",
+                            color = Color(0xFFB8C5EB),
+                            fontSize = 10.sp
+                        )
+                        capturedSources.forEach { source ->
+                            val isSelected = selectedSourceUrl == source.url
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { selectedSourceUrl = source.url },
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (isSelected) Color(0xFF15372F) else Color(0xFF20294A)
+                                ),
+                                border = androidx.compose.foundation.BorderStroke(
+                                    width = if (isSelected) 1.5.dp else 0.5.dp,
+                                    color = if (isSelected) Color(0xFF2EE6A6) else Color(0xFF465176)
+                                ),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Column(modifier = Modifier.padding(9.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            if (isSelected) Icons.Default.CheckCircle else Icons.Default.Download,
+                                            contentDescription = null,
+                                            tint = if (isSelected) Color(0xFF2EE6A6) else Color(0xFF22E3FF),
+                                            modifier = Modifier.size(19.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(7.dp))
+                                        Text(
+                                            when {
+                                                source.isPlaying -> "الفيديو الذي يعمل الآن"
+                                                source.sourceKind == "active-video" -> "عنصر فيديو في الصفحة"
+                                                source.sourceKind == "video-source" -> "مصدر فيديو في الصفحة"
+                                                else -> "طلب شبكة مرشح — تحقق قبل التنزيل"
+                                            },
+                                            color = Color.White,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 11.sp
+                                        )
+                                        Spacer(modifier = Modifier.weight(1f))
+                                        Text(
+                                            if (isSelected) "محدد" else "اختيار",
+                                            color = if (isSelected) Color(0xFF2EE6A6) else Color(0xFF9EABD0),
+                                            fontSize = 10.sp
+                                        )
+                                    }
+                                    if (source.width > 0 && source.height > 0) {
+                                        Text(
+                                            "${source.width} × ${source.height} · " +
+                                                if (source.durationMs > 0) String.format(java.util.Locale.US, "%.0f ثانية", source.durationMs / 1000.0)
+                                                else "المدة غير معلنة",
+                                            color = Color(0xFF9EABD0),
+                                            fontSize = 9.sp
+                                        )
+                                    }
+                                    Text(
+                                        source.url,
+                                        color = Color(0xFF80CBC4),
+                                        fontSize = 9.sp,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
                             }
                         }
                     }
@@ -354,7 +463,7 @@ fun WebVideoSnifferDialog(
                                     ): Boolean {
                                         val scheme = request.url.scheme?.lowercase().orEmpty()
                                         if (scheme == "http" || scheme == "https") return false
-                                        browserError = "الموقع طلب فتح رابط خارجي (" + scheme + "). تم إيقافه حتى لا تظهر صفحة بيضاء أو خطأ بروتوكول."
+                                        browserError = "تم تجاهل رابط خارجي (" + scheme + "). يمكنك متابعة تشغيل الفيديو وفحص مصادره داخل المستكشف."
                                         return true
                                     }
 
@@ -490,13 +599,18 @@ fun WebVideoSnifferDialog(
                                 Spacer(modifier = Modifier.height(6.dp))
                                 Text(message, color = Color(0xFFD3DAF1), fontSize = 11.sp)
                                 Spacer(modifier = Modifier.height(10.dp))
-                                Button(
-                                    onClick = { openCurrentPageExternally() },
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF22E3FF), contentColor = Color(0xFF0E1230))
-                                ) {
-                                    Icon(Icons.Default.OpenInBrowser, contentDescription = null)
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("فتح بالمتصفح الخارجي")
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    TextButton(onClick = { browserError = null }) {
+                                        Text("متابعة فحص الفيديو", color = Color(0xFF2EE6A6))
+                                    }
+                                    Button(
+                                        onClick = { openCurrentPageExternally() },
+                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF22E3FF), contentColor = Color(0xFF0E1230))
+                                    ) {
+                                        Icon(Icons.Default.OpenInBrowser, contentDescription = null)
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("فتح الصفحة خارجياً")
+                                    }
                                 }
                             }
                         }
@@ -508,14 +622,16 @@ fun WebVideoSnifferDialog(
             if (capturedSources.isNotEmpty()) {
                 Button(
                     onClick = {
-                        onVideoFound(capturedSources.first())
+                        val selected = capturedSources.firstOrNull { it.url == selectedSourceUrl }
+                            ?: capturedSources.firstOrNull()
+                        if (selected != null) onVideoFound(selected)
                         onDismiss()
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2EE6A6), contentColor = Color(0xFF0E1230))
                 ) {
                     Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("استخدام الرابط وبدء التنزيل", fontWeight = FontWeight.Bold)
+                    Text("استخدام الفيديو المحدد", fontWeight = FontWeight.Bold)
                 }
             }
         },
