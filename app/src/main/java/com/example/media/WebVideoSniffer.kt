@@ -84,14 +84,15 @@ object WebVideoSnifferHelper {
 
     fun isMediaStreamUrl(url: String, mimeType: String? = null): Boolean {
         if (!url.startsWith("https://", true) && !url.startsWith("http://", true)) return false
-        val responseMime = mimeType?.substringBefore(';')?.trim()?.lowercase().orEmpty()
-        if (responseMime.startsWith("video/") || responseMime.startsWith("audio/")) return true
         val uri = Uri.parse(url)
         val host = uri.host?.lowercase().orEmpty()
         val path = uri.path?.lowercase().orEmpty()
         val query = uri.encodedQuery?.lowercase().orEmpty()
 
         val extension = path.substringAfterLast('.', "")
+        if (extension in setOf("m3u8", "mpd")) return false
+        val responseMime = mimeType?.substringBefore(';')?.trim()?.lowercase().orEmpty()
+        if (responseMime.startsWith("video/") || responseMime.startsWith("audio/")) return true
         if (extension in setOf("mp4", "m4v", "webm", "mov", "mkv", "3gp", "avi", "flv")) {
             return true
         }
@@ -168,8 +169,8 @@ fun WebVideoSnifferDialog(
     fun scanCurrentPage() {
         val view = webViewRef ?: return
         runCatching {
-            scanWebViewForVideoSources(view) { url ->
-                captureCandidate(url, latestPageUrl.get(), captureUserAgent)
+            scanWebViewForVideoSources(view) { url, mimeType ->
+                captureCandidate(url, latestPageUrl.get(), captureUserAgent, mimeType)
             }
         }.onFailure {
             browserError = "تعذر فحص الصفحة بحثاً عن ملفات فيديو مباشرة."
@@ -377,8 +378,8 @@ fun WebVideoSnifferDialog(
                                             addressInput = url
                                         }
                                         view?.let {
-                                            scanWebViewForVideoSources(it) { mediaUrl ->
-                                                captureCandidate(mediaUrl, latestPageUrl.get(), captureUserAgent)
+                                            scanWebViewForVideoSources(it) { mediaUrl, mimeType ->
+                                                captureCandidate(mediaUrl, latestPageUrl.get(), captureUserAgent, mimeType)
                                             }
                                         }
                                     }
@@ -387,22 +388,16 @@ fun WebVideoSnifferDialog(
                                         view: WebView?,
                                         request: WebResourceRequest?
                                     ): WebResourceResponse? {
-                                        // This callback runs on a WebView worker thread. Inspect the response MIME
-                                        // instead of relying only on URL suffixes: CDNs often use opaque URLs.
-                                        val response = super.shouldInterceptRequest(view, request)
+                                        // The default WebView callback does not expose response headers.
+                                        // Element discovery below supplies the known video/audio media type.
                                         val mediaUrl = request?.url?.toString().orEmpty()
                                         if (mediaUrl.isNotBlank()) {
                                             val pageReferer = request?.requestHeaders?.entries
                                                 ?.firstOrNull { it.key.equals("Referer", true) }?.value
                                                 ?: latestPageUrl.get()
-                                            captureCandidate(
-                                                mediaUrl,
-                                                pageReferer,
-                                                captureUserAgent,
-                                                response?.mimeType
-                                            )
+                                            captureCandidate(mediaUrl, pageReferer, captureUserAgent)
                                         }
-                                        return response
+                                        return super.shouldInterceptRequest(view, request)
                                     }
 
                                     override fun onLoadResource(view: WebView?, url: String?) {
@@ -532,18 +527,26 @@ fun WebVideoSnifferDialog(
     )
 }
 
-private fun scanWebViewForVideoSources(view: WebView, onFound: (String) -> Unit) {
+private fun scanWebViewForVideoSources(
+    view: WebView,
+    onFound: (url: String, mimeType: String?) -> Unit
+) {
     val script = """
         (function() {
             var results = [];
-            document.querySelectorAll('video').forEach(function(video) {
-                if (video.currentSrc) results.push(video.currentSrc);
-                if (video.src) results.push(video.src);
-                video.querySelectorAll('source').forEach(function(source) {
-                    if (source.src) results.push(source.src);
+            function pushMedia(url, mimeType) {
+                if (url) results.push({ url: url, mimeType: mimeType || null });
+            }
+            document.querySelectorAll('video, audio').forEach(function(media) {
+                var tag = media.tagName.toLowerCase();
+                var fallbackMime = tag === 'audio' ? 'audio/*' : 'video/*';
+                pushMedia(media.currentSrc, fallbackMime);
+                pushMedia(media.src, fallbackMime);
+                media.querySelectorAll('source').forEach(function(source) {
+                    pushMedia(source.src, source.type || fallbackMime);
                 });
             });
-            return JSON.stringify(Array.from(new Set(results)));
+            return JSON.stringify(results);
         })();
     """.trimIndent()
 
@@ -552,7 +555,10 @@ private fun scanWebViewForVideoSources(view: WebView, onFound: (String) -> Unit)
             val jsonText = JSONTokener(rawResult).nextValue() as? String ?: "[]"
             val values = JSONArray(jsonText)
             for (index in 0 until values.length()) {
-                values.optString(index).takeIf { it.isNotBlank() }?.let(onFound)
+                val media = values.optJSONObject(index) ?: continue
+                val url = media.optString("url").takeIf { it.isNotBlank() && it != "null" } ?: continue
+                val mimeType = media.optString("mimeType").takeIf { it.isNotBlank() && it != "null" }
+                onFound(url, mimeType)
             }
         }
     }
