@@ -1201,7 +1201,8 @@ fun ToolsScreen(
                                                         urlStr = savedMetadata?.directUrl ?: downloadUrl.trim(),
                                                         requestHeaders = downloadRequestHeaders,
                                                         customFileName = savedMetadata?.fileName,
-                                                        mimeTypeHint = savedMetadata?.mimeType
+                                                        mimeTypeHint = savedMetadata?.mimeType,
+                                                        wifiOnly = wifiOnlyDownloads
                                                     ) { progress ->
                                                         scope.launch(Dispatchers.Main) {
                                                             downloadPercent = progress.percent.coerceAtLeast(0)
@@ -1318,7 +1319,8 @@ fun ToolsScreen(
                                             urlStr = verifiedDirectUrl,
                                             requestHeaders = downloadRequestHeaders,
                                             customFileName = verified.fileName,
-                                            mimeTypeHint = verified.mimeType
+                                            mimeTypeHint = verified.mimeType,
+                                            wifiOnly = wifiOnlyDownloads
                                         ) { progress ->
                                             scope.launch(Dispatchers.Main) {
                                                 downloadPercent = progress.percent.coerceAtLeast(0)
@@ -1412,7 +1414,8 @@ fun ToolsScreen(
                                                             urlStr = check.directUrl,
                                                             customFileName = check.fileName,
                                                             mimeType = check.mimeType,
-                                                            requestHeaders = downloadRequestHeaders
+                                                            requestHeaders = downloadRequestHeaders,
+                                                            wifiOnly = wifiOnlyDownloads
                                                         )
                                                         showDownloadDialog = false
                                                         downloadUrl = ""
@@ -1428,7 +1431,8 @@ fun ToolsScreen(
                                                 val result = com.example.media.RealMediaDownloader.enqueueDownloadQueue(
                                                     context = context,
                                                     rawLinks = links,
-                                                    requestHeaders = downloadRequestHeaders
+                                                    requestHeaders = downloadRequestHeaders,
+                                                    wifiOnly = wifiOnlyDownloads
                                                 )
                                                 if (result.queuedCount > 0) {
                                                     showDownloadDialog = false
