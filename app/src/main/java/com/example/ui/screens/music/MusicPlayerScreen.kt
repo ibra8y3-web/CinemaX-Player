@@ -62,6 +62,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -127,22 +128,49 @@ fun MusicPlayerScreen(
     var audioToCut by remember { mutableStateOf<LocalAudio?>(null) }
     var audioToDelete by remember { mutableStateOf<LocalAudio?>(null) }
     var pendingDeleteConsentAudio by remember { mutableStateOf<LocalAudio?>(null) }
+    var pendingBulkConsentAudios by remember { mutableStateOf<List<LocalAudio>>(emptyList()) }
+    var isSelectionMode by remember { mutableStateOf(false) }
+    var selectedAudioIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
+    var showBulkDeleteDialog by remember { mutableStateOf(false) }
+
+    fun toggleAudioSelection(audioId: Long) {
+        selectedAudioIds = if (audioId in selectedAudioIds) {
+            selectedAudioIds - audioId
+        } else {
+            selectedAudioIds + audioId
+        }
+    }
 
     val deleteConsentLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartIntentSenderForResult()
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
-            pendingDeleteConsentAudio?.let { deletedAudio ->
+            val bulkTargets = pendingBulkConsentAudios
+            if (bulkTargets.isNotEmpty()) {
                 scope.launch {
-                    mediaScanner.finalizeAudioDeletion(deletedAudio)
-                    musicManager.removeTrackFromPlaylist(deletedAudio.id)
-                    Toast.makeText(context, "🗑️ تم حذف المقطع الصوتي بنجاح", Toast.LENGTH_SHORT).show()
+                    bulkTargets.forEach { audio ->
+                        mediaScanner.finalizeAudioDeletion(audio)
+                        musicManager.removeTrackFromPlaylist(audio.id)
+                    }
+                    selectedAudioIds = emptySet()
+                    isSelectionMode = false
+                    Toast.makeText(context, "تم حذف ${bulkTargets.size} ملفات صوتية", Toast.LENGTH_SHORT).show()
                     viewModel.loadLocalAudioFiles()
+                }
+            } else {
+                pendingDeleteConsentAudio?.let { deletedAudio ->
+                    scope.launch {
+                        mediaScanner.finalizeAudioDeletion(deletedAudio)
+                        musicManager.removeTrackFromPlaylist(deletedAudio.id)
+                        Toast.makeText(context, "🗑️ تم حذف المقطع الصوتي بنجاح", Toast.LENGTH_SHORT).show()
+                        viewModel.loadLocalAudioFiles()
+                    }
                 }
             }
         } else {
             Toast.makeText(context, "تم إلغاء حذف الملف الصوتي", Toast.LENGTH_SHORT).show()
         }
+        pendingBulkConsentAudios = emptyList()
         pendingDeleteConsentAudio = null
     }
 
@@ -400,6 +428,57 @@ fun MusicPlayerScreen(
             }
         }
 
+        if (selectedTab == 0) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = if (isSelectionMode) "تم تحديد ${selectedAudioIds.size} من ${filteredAudio.size}" else "يمكنك تحديد أكثر من مقطع للحذف",
+                    color = if (isSelectionMode) Color(0xFF2EE6A6) else Color(0xFFA9B4D6),
+                    fontSize = 11.sp,
+                    modifier = Modifier.weight(1f)
+                )
+                if (isSelectionMode) {
+                    TextButton(
+                        onClick = { selectedAudioIds = filteredAudio.map { it.id }.toSet() },
+                        enabled = filteredAudio.isNotEmpty()
+                    ) { Text("الكل", fontSize = 10.sp) }
+                    TextButton(
+                        onClick = {
+                            selectedAudioIds = emptySet()
+                            isSelectionMode = false
+                        }
+                    ) { Text("إلغاء", fontSize = 10.sp) }
+                    Button(
+                        onClick = { showBulkDeleteDialog = true },
+                        enabled = selectedAudioIds.isNotEmpty(),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6B8B)),
+                        contentPadding = PaddingValues(horizontal = 9.dp, vertical = 4.dp),
+                        modifier = Modifier.testTag("delete_selected_audio_btn")
+                    ) {
+                        Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(3.dp))
+                        Text("حذف", fontSize = 10.sp)
+                    }
+                } else {
+                    TextButton(
+                        onClick = {
+                            isSelectionMode = true
+                            selectedAudioIds = emptySet()
+                        },
+                        modifier = Modifier.testTag("start_audio_selection_btn")
+                    ) { Text("تحديد عدة مقاطع", fontSize = 10.sp) }
+                }
+            }
+        } else {
+            isSelectionMode = false
+            selectedAudioIds = emptySet()
+        }
+
         // Tab Content
         Box(modifier = Modifier.weight(1f)) {
             when (selectedTab) {
@@ -412,7 +491,10 @@ fun MusicPlayerScreen(
                     },
                     onCutAudio = { audio -> audioToCut = audio },
                     onShareAudio = { audio -> shareAudioFile(context, audio) },
-                    onDeleteAudio = { audio -> audioToDelete = audio }
+                    onDeleteAudio = { audio -> audioToDelete = audio },
+                    isSelectionMode = isSelectionMode,
+                    selectedAudioIds = selectedAudioIds,
+                    onToggleSelection = { audioId -> toggleAudioSelection(audioId) }
                 )
                 1 -> GroupedArtistsContent(
                     audioList = filteredAudio,
@@ -544,6 +626,64 @@ fun MusicPlayerScreen(
                 }
             )
         }
+        if (showBulkDeleteDialog) {
+            val targets = audioFiles.filter { it.id in selectedAudioIds }
+            AlertDialog(
+                onDismissRequest = { showBulkDeleteDialog = false },
+                containerColor = Color(0xFF1A1F4A),
+                title = { Text("حذف المقاطع الصوتية المحددة", color = Color.White, fontWeight = FontWeight.Bold) },
+                text = {
+                    Text(
+                        "سيتم حذف ${targets.size} ملفات صوتية من ذاكرة الهاتف. لا يمكن التراجع عن الحذف.",
+                        color = Color(0xFFD5DCF2),
+                        fontSize = 13.sp
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        enabled = targets.isNotEmpty(),
+                        onClick = {
+                            showBulkDeleteDialog = false
+                            scope.launch {
+                                when (
+                                    val result = mediaScanner.requestBatchDeleteUris(
+                                        uris = targets.map { it.contentUri },
+                                        fallbackPaths = targets.map { it.filePath }
+                                    )
+                                ) {
+                                    is MediaScanner.MediaDeleteResult.DirectSuccess -> {
+                                        targets.forEach { audio ->
+                                            mediaScanner.finalizeAudioDeletion(audio)
+                                            musicManager.removeTrackFromPlaylist(audio.id)
+                                        }
+                                        selectedAudioIds = emptySet()
+                                        isSelectionMode = false
+                                        Toast.makeText(context, "تم حذف ${targets.size} ملفات صوتية", Toast.LENGTH_LONG).show()
+                                        viewModel.loadLocalAudioFiles()
+                                    }
+                                    is MediaScanner.MediaDeleteResult.RequiresConsent -> {
+                                        pendingBulkConsentAudios = targets
+                                        deleteConsentLauncher.launch(
+                                            IntentSenderRequest.Builder(result.intentSender).build()
+                                        )
+                                    }
+                                    is MediaScanner.MediaDeleteResult.Failed -> {
+                                        Toast.makeText(context, result.reason, Toast.LENGTH_LONG).show()
+                                    }
+                                }
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6B8B)),
+                        modifier = Modifier.testTag("confirm_delete_selected_audio_btn")
+                    ) { Text("حذف المحدد", fontWeight = FontWeight.Bold) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showBulkDeleteDialog = false }) {
+                        Text("إلغاء", color = Color(0xFFA9B4D6))
+                    }
+                }
+            )
+        }
     }
 }
 
@@ -555,7 +695,10 @@ private fun AudioListContent(
     onPlayAudio: (LocalAudio) -> Unit,
     onCutAudio: (LocalAudio) -> Unit,
     onShareAudio: (LocalAudio) -> Unit,
-    onDeleteAudio: (LocalAudio) -> Unit
+    onDeleteAudio: (LocalAudio) -> Unit,
+    isSelectionMode: Boolean,
+    selectedAudioIds: Set<Long>,
+    onToggleSelection: (Long) -> Unit
 ) {
     LazyColumn(
         contentPadding = PaddingValues(16.dp),
@@ -564,18 +707,29 @@ private fun AudioListContent(
     ) {
         items(audioList, key = { it.id }) { audio ->
             val isSelected = currentPlaying?.id == audio.id
+            val isMarkedForDeletion = audio.id in selectedAudioIds
             Card(
                 shape = RoundedCornerShape(14.dp),
                 colors = CardDefaults.cardColors(
-                    containerColor = if (isSelected) Color(0xFF2A2470) else Color(0xFF1A1F4A)
+                    containerColor = when {
+                        isMarkedForDeletion -> Color(0xFF193B4A)
+                        isSelected -> Color(0xFF2A2470)
+                        else -> Color(0xFF1A1F4A)
+                    }
                 ),
                 border = androidx.compose.foundation.BorderStroke(
-                    1.dp,
-                    if (isSelected) Color(0xFF9D7BFF) else Color(0xFF272D66)
+                    if (isMarkedForDeletion) 2.dp else 1.dp,
+                    when {
+                        isMarkedForDeletion -> Color(0xFF2EE6A6)
+                        isSelected -> Color(0xFF9D7BFF)
+                        else -> Color(0xFF272D66)
+                    }
                 ),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { onPlayAudio(audio) }
+                    .clickable {
+                        if (isSelectionMode) onToggleSelection(audio.id) else onPlayAudio(audio)
+                    }
                     .testTag("audio_card_${audio.id}")
             ) {
                 Row(
@@ -646,48 +800,36 @@ private fun AudioListContent(
 
                         Spacer(modifier = Modifier.height(4.dp))
 
-                        CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 28.dp) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(2.dp)
-                            ) {
-                                // Cut / Trim Button
-                                IconButton(
-                                    onClick = { onCutAudio(audio) },
-                                    modifier = Modifier.size(28.dp).testTag("cut_audio_btn_${audio.id}")
+                        if (isSelectionMode) {
+                            Checkbox(
+                                checked = isMarkedForDeletion,
+                                onCheckedChange = { onToggleSelection(audio.id) },
+                                modifier = Modifier.testTag("select_audio_${audio.id}")
+                            )
+                        } else {
+                            CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 28.dp) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(2.dp)
                                 ) {
-                                    Icon(
-                                        Icons.Default.ContentCut,
-                                        contentDescription = "قص الأغنية ونغمة",
-                                        tint = Color(0xFFFFC857),
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
-
-                                // Share Button
-                                IconButton(
-                                    onClick = { onShareAudio(audio) },
-                                    modifier = Modifier.size(28.dp).testTag("share_audio_btn_${audio.id}")
-                                ) {
-                                    Icon(
-                                        Icons.Default.Share,
-                                        contentDescription = "مشاركة الأغنية",
-                                        tint = Color(0xFF22E3FF),
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
-
-                                // Delete Button
-                                IconButton(
-                                    onClick = { onDeleteAudio(audio) },
-                                    modifier = Modifier.size(28.dp).testTag("delete_audio_btn_${audio.id}")
-                                ) {
-                                    Icon(
-                                        Icons.Default.Delete,
-                                        contentDescription = "حذف المقطع الصوتي",
-                                        tint = Color(0xFFFF6B8B),
-                                        modifier = Modifier.size(16.dp)
-                                    )
+                                    IconButton(
+                                        onClick = { onCutAudio(audio) },
+                                        modifier = Modifier.size(28.dp).testTag("cut_audio_btn_${audio.id}")
+                                    ) {
+                                        Icon(Icons.Default.ContentCut, contentDescription = "قص الأغنية ونغمة", tint = Color(0xFFFFC857), modifier = Modifier.size(16.dp))
+                                    }
+                                    IconButton(
+                                        onClick = { onShareAudio(audio) },
+                                        modifier = Modifier.size(28.dp).testTag("share_audio_btn_${audio.id}")
+                                    ) {
+                                        Icon(Icons.Default.Share, contentDescription = "مشاركة الأغنية", tint = Color(0xFF22E3FF), modifier = Modifier.size(16.dp))
+                                    }
+                                    IconButton(
+                                        onClick = { onDeleteAudio(audio) },
+                                        modifier = Modifier.size(28.dp).testTag("delete_audio_btn_${audio.id}")
+                                    ) {
+                                        Icon(Icons.Default.Delete, contentDescription = "حذف المقطع الصوتي", tint = Color(0xFFFF6B8B), modifier = Modifier.size(16.dp))
+                                    }
                                 }
                             }
                         }
