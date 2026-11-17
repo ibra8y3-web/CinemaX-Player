@@ -4,6 +4,7 @@ import com.example.media.RealMediaDownloader
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertFalse
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -88,6 +89,28 @@ class RealMediaDownloaderRoutingTest {
         assertEquals(2, links.size)
         assertTrue(links[0].endsWith("a.pdf"))
         assertTrue(links[1].endsWith("video.mp4"))
+    }
+
+    @Test
+    fun webSnifferRecognizesOpaqueMediaUrlsFromResponseMimeType() {
+        assertTrue(
+            com.example.media.WebVideoSnifferHelper.isMediaStreamUrl(
+                "https://cdn.example.net/resource?id=video-123",
+                "video/mp4"
+            )
+        )
+        assertTrue(
+            com.example.media.WebVideoSnifferHelper.isMediaStreamUrl(
+                "https://cdn.example.net/audio?id=track-123",
+                "audio/mpeg"
+            )
+        )
+        assertFalse(
+            com.example.media.WebVideoSnifferHelper.isMediaStreamUrl(
+                "https://cdn.example.net/page?id=123",
+                "text/html"
+            )
+        )
     }
 
     @Test
