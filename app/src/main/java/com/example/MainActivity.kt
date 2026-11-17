@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.res.Configuration
+import android.net.Uri
 import android.graphics.drawable.Icon
 import android.os.Build
 import android.os.Bundle
@@ -16,6 +17,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
@@ -31,6 +35,7 @@ import kotlinx.coroutines.launch
 class MainActivity : ComponentActivity() {
 
     private val viewModel: MainViewModel by viewModels()
+    private var incomingShareRequest by mutableStateOf<IncomingShareRequest?>(null)
 
     companion object {
         const val ACTION_PIP_PLAY_PAUSE = "com.example.cinemax.ACTION_PIP_PLAY_PAUSE"
@@ -83,6 +88,7 @@ class MainActivity : ComponentActivity() {
         }
 
         handleDeepLinkIntent(intent)
+        handleExternalShareIntent(intent)
 
         setContent {
             MyApplicationTheme {
@@ -90,7 +96,11 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = DarkBackground
                 ) {
-                    MainScreen(viewModel = viewModel)
+                    MainScreen(
+                        viewModel = viewModel,
+                        incomingShareRequest = incomingShareRequest,
+                        onConsumeIncomingShare = { incomingShareRequest = null }
+                    )
                 }
             }
         }
@@ -100,6 +110,49 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         handleDeepLinkIntent(intent)
+        handleExternalShareIntent(intent)
+    }
+
+    @Suppress("DEPRECATION")
+    private fun handleExternalShareIntent(intent: Intent?) {
+        val action = intent?.action
+        if (action != Intent.ACTION_SEND && action != Intent.ACTION_SEND_MULTIPLE) return
+
+        val sharedText = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()?.trim()
+            ?.takeIf { it.isNotBlank() }
+        val uris = linkedSetOf<Uri>()
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (action == Intent.ACTION_SEND_MULTIPLE) {
+                intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java)
+                    ?.let { uris.addAll(it) }
+            } else {
+                intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)?.let { uris.add(it) }
+            }
+        } else {
+            if (action == Intent.ACTION_SEND_MULTIPLE) {
+                intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)?.let { uris.addAll(it) }
+            } else {
+                (intent.getParcelableExtra(Intent.EXTRA_STREAM) as? Uri)?.let { uris.add(it) }
+            }
+        }
+
+        intent.clipData?.let { clip ->
+            for (index in 0 until clip.itemCount) {
+                clip.getItemAt(index).uri?.let { uris.add(it) }
+            }
+        }
+        intent.data?.let { dataUri ->
+            if (dataUri.scheme.equals("content", ignoreCase = true)) uris.add(dataUri)
+        }
+
+        if (sharedText.isNullOrBlank() && uris.isEmpty()) return
+        incomingShareRequest = IncomingShareRequest(
+            id = System.currentTimeMillis(),
+            text = sharedText,
+            uris = uris.toList(),
+            mimeType = intent.type
+        )
     }
 
     private fun handleDeepLinkIntent(intent: Intent?) {
