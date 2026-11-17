@@ -492,7 +492,13 @@ object RealMediaDownloader {
             setTitle("تحميل ملف: $fileName")
             setDescription("CinemaX Player — تنزيل ملف إلى مجلد Downloads")
             setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-            setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
+            val mediaDirectory = when {
+                mimeType?.startsWith("video/") == true -> Environment.DIRECTORY_MOVIES
+                mimeType?.startsWith("audio/") == true -> Environment.DIRECTORY_MUSIC
+                mimeType?.startsWith("image/") == true -> Environment.DIRECTORY_PICTURES
+                else -> Environment.DIRECTORY_DOWNLOADS
+            }
+            setDestinationInExternalPublicDir(mediaDirectory, "CinemaXPlayer/$fileName")
             mimeType?.takeIf { it.isNotBlank() }?.let { setMimeType(it) }
             addRequestHeader("User-Agent", requestHeaders.entries.firstOrNull { it.key.equals("User-Agent", true) }?.value ?: USER_AGENT_CHROME)
             addRequestHeader("Accept", requestHeaders.entries.firstOrNull { it.key.equals("Accept", true) }?.value ?: "*/*")

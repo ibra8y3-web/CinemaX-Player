@@ -1226,6 +1226,7 @@ fun ToolsScreen(
                                                             if (progress.isCompleted) {
                                                                 isDownloading = false
                                                                 isDownloadPaused = false
+                                                                onMediaChanged()
                                                                 showDownloadDialog = false
                                                                 downloadUrl = ""
                                                                 downloadRequestHeaders = emptyMap()
@@ -1339,6 +1340,7 @@ fun ToolsScreen(
                                                 if (progress.isCompleted) {
                                                     isDownloading = false
                                                     isDownloadPaused = false
+                                                    onMediaChanged()
                                                     showDownloadDialog = false
                                                     downloadUrl = ""
                                                     downloadRequestHeaders = emptyMap()

@@ -143,15 +143,19 @@ fun MainScreen(
     var videoToEncrypt by remember { mutableStateOf<LocalVideo?>(null) }
     var encryptPin by remember { mutableStateOf("") }
 
-    // Permission handling (READ_MEDIA_VIDEO and READ_MEDIA_AUDIO on Android 13+, READ_EXTERNAL_STORAGE on older)
+    // Android 13+ uses granular media permissions. Android 9 and older also need
+    // WRITE_EXTERNAL_STORAGE for public-folder imports and media processing.
     val requiredPermissions = remember {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            arrayOf(
+        when {
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> arrayOf(
                 Manifest.permission.READ_MEDIA_VIDEO,
                 Manifest.permission.READ_MEDIA_AUDIO
             )
-        } else {
-            arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+            Build.VERSION.SDK_INT <= Build.VERSION_CODES.P -> arrayOf(
+                Manifest.permission.READ_EXTERNAL_STORAGE,
+                Manifest.permission.WRITE_EXTERNAL_STORAGE
+            )
+            else -> arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
         }
     }
 

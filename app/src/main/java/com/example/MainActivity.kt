@@ -1,5 +1,6 @@
 package com.example
 
+import android.app.DownloadManager
 import android.app.PendingIntent
 import android.app.PictureInPictureParams
 import android.app.RemoteAction
@@ -43,6 +44,15 @@ class MainActivity : ComponentActivity() {
         const val ACTION_PIP_FORWARD = "com.example.cinemax.ACTION_PIP_FORWARD"
     }
 
+    private val downloadCompleteReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == DownloadManager.ACTION_DOWNLOAD_COMPLETE) {
+                viewModel.loadLocalVideos()
+                viewModel.loadLocalAudioFiles()
+            }
+        }
+    }
+
     private val pipReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
@@ -72,6 +82,13 @@ class MainActivity : ComponentActivity() {
             registerReceiver(pipReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
         } else {
             registerReceiver(pipReceiver, filter)
+        }
+
+        val downloadCompleteFilter = IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(downloadCompleteReceiver, downloadCompleteFilter, ContextCompat.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(downloadCompleteReceiver, downloadCompleteFilter)
         }
 
         // Dynamically update PiP parameters whenever playback or aspect ratio changes
@@ -272,6 +289,9 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
         try {
             unregisterReceiver(pipReceiver)
+        } catch (_: Exception) {}
+        try {
+            unregisterReceiver(downloadCompleteReceiver)
         } catch (_: Exception) {}
     }
 }
