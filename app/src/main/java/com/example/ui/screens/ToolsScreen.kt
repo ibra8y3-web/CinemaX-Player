@@ -187,6 +187,7 @@ fun ToolsScreen(
             Toast.makeText(context, "أدخل رابط صفحة أو ملف أولاً.", Toast.LENGTH_SHORT).show()
             return
         }
+        downloadUrl = url
         universalInfoUrl = url
         universalInfo = null
         selectedUniversalFormat = null
@@ -1258,34 +1259,19 @@ fun ToolsScreen(
                                         Spacer(modifier = Modifier.height(4.dp))
                                         Text(res.advice, color = Color(0xFFE6EAFA), fontSize = 11.sp)
                                         Text(
-                                            if (res.platform.equals("YouTube", ignoreCase = true)) {
-                                                "رابط YouTube لا يتحول إلى ملف تنزيل مباشر داخل CinemaX. افتح الفيديو في YouTube واستخدم خياراته الرسمية المتاحة."
-                                            } else {
-                                                "هذا رابط صفحة وليس ملفاً مباشراً. افتح الصفحة في المستكشف، شغّل الوسائط، ثم اختر المصدر المباشر إذا أتاحه الموقع."
-                                            },
+                                            "محرك المواقع سيحاول تحليل الصفحة وعرض الصيغ العامة المتاحة. إذا تطلب الموقع حساباً أو منع الاستخراج أو استخدم DRM، سيعرض سبب عدم الإتاحة بدلاً من تنزيل ملف غير صحيح.",
                                             color = Color(0xFFB8C5EB),
                                             fontSize = 10.sp
                                         )
                                         Spacer(modifier = Modifier.height(8.dp))
                                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                             Button(
-                                                onClick = {
-                                                    if (res.platform.equals("YouTube", ignoreCase = true)) {
-                                                        runCatching {
-                                                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(res.pageUrl)))
-                                                        }.onFailure {
-                                                            Toast.makeText(context, "تعذر فتح YouTube على هذا الجهاز.", Toast.LENGTH_LONG).show()
-                                                        }
-                                                    } else {
-                                                        downloadUrl = res.pageUrl
-                                                        showDownloadDialog = false
-                                                        showSnifferDialog = true
-                                                    }
-                                                },
+                                                onClick = { inspectWithUniversalEngine(res.pageUrl) },
+                                                enabled = !isUniversalInspecting && !isUniversalDownloading,
                                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF22E3FF), contentColor = Color(0xFF0E1230)),
                                                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
                                             ) {
-                                                Text(if (res.platform.equals("YouTube", ignoreCase = true)) "فتح YouTube" else "فتح في المستكشف", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                                Text("فحص بمحرك المواقع", fontSize = 10.sp, fontWeight = FontWeight.Bold)
                                             }
                                             OutlinedButton(
                                                 onClick = {
@@ -1624,16 +1610,7 @@ fun ToolsScreen(
                                             val socialPage = currentVerification
                                             isDownloading = false
                                             isVerifyingUrl = false
-                                            if (socialPage.platform.equals("YouTube", ignoreCase = true)) {
-                                                Toast.makeText(context, socialPage.advice, Toast.LENGTH_LONG).show()
-                                                runCatching {
-                                                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(socialPage.pageUrl)))
-                                                }
-                                            } else {
-                                                downloadUrl = socialPage.pageUrl
-                                                showDownloadDialog = false
-                                                showSnifferDialog = true
-                                            }
+                                            inspectWithUniversalEngine(socialPage.pageUrl)
                                             return@launch
                                         }
 
@@ -1760,16 +1737,7 @@ fun ToolsScreen(
                                                     )
                                                 ) {
                                                     is com.example.media.RealMediaDownloader.VideoVerificationResult.SocialWebPage -> {
-                                                        if (check.platform.equals("YouTube", ignoreCase = true)) {
-                                                            Toast.makeText(context, check.advice, Toast.LENGTH_LONG).show()
-                                                            runCatching {
-                                                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(check.pageUrl)))
-                                                            }
-                                                        } else {
-                                                            downloadUrl = check.pageUrl
-                                                            showDownloadDialog = false
-                                                            showSnifferDialog = true
-                                                        }
+                                                        inspectWithUniversalEngine(check.pageUrl)
                                                     }
                                                     is com.example.media.RealMediaDownloader.VideoVerificationResult.Invalid -> {
                                                         Toast.makeText(context, check.reason, Toast.LENGTH_LONG).show()
