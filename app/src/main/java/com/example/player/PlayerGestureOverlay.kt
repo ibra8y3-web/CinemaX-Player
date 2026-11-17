@@ -507,6 +507,7 @@ fun PlayerGestureOverlay(
     // This keeps taps on the menu, scrubber, and action buttons out of the
     // gesture detector that is only meant for the video viewport.
     content()
+    }
 }
 
 @Composable
