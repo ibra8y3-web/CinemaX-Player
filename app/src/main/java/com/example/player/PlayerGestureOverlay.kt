@@ -46,6 +46,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -117,6 +118,7 @@ fun PlayerGestureOverlay(
     var unlockResetJob by remember { mutableStateOf<Job?>(null) }
 
     val scope = rememberCoroutineScope()
+    val latestCurrentPosMs by rememberUpdatedState(currentPosMs)
     var hideJob by remember { mutableStateOf<Job?>(null) }
 
     fun triggerHideTimer() {
@@ -182,9 +184,12 @@ fun PlayerGestureOverlay(
         }
     }
 
-    Box(
-        modifier = modifier
-            .fillMaxSize()
+    Box(modifier = modifier.fillMaxSize()) {
+        // Gesture detector is a sibling of the control layer. This ensures
+        // controls receive taps before the full-screen gesture surface does.
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
             // 1. Pinch to Zoom & Pan transform gestures (when unlocked)
             .pointerInput(isLocked) {
                 if (isLocked) return@pointerInput
@@ -237,7 +242,7 @@ fun PlayerGestureOverlay(
                 }
             }
             // 3. Single-finger drag for volume, brightness, seek (when not locked and not zoomed)
-            .pointerInput(isLocked, zoomScale, durationMs, currentPosMs) {
+            .pointerInput(isLocked, zoomScale, durationMs) {
                 if (isLocked || zoomScale > 1.1f) return@pointerInput
 
                 var dragMode = 0 // 0: undecided, 1: brightness, 2: volume, 3: horizontal seek
@@ -253,7 +258,7 @@ fun PlayerGestureOverlay(
                     },
                     onDragEnd = {
                         if (dragMode == 3 && seekDeltaMs != 0L) {
-                            onSeek((currentPosMs + seekDeltaMs).coerceIn(0L, durationMs))
+                            onSeek((latestCurrentPosMs + seekDeltaMs).coerceIn(0L, durationMs))
                         }
                         triggerHideTimer()
                     },
@@ -310,8 +315,6 @@ fun PlayerGestureOverlay(
                 )
             }
     ) {
-        content()
-
         // Animated Kids Lock Bubbles Canvas
         if (isLocked && kidsBubbles.isNotEmpty()) {
             Canvas(modifier = Modifier.fillMaxSize()) {
@@ -493,6 +496,9 @@ fun PlayerGestureOverlay(
                 }
             }
         }
+        // Draw interactive controls above the gesture surface so menu items,
+        // sliders and buttons keep their own pointer handling.
+        content()
     }
 }
 
