@@ -167,6 +167,50 @@ object RealMediaDownloader {
         val savedFilePath: String? = null
     )
 
+    data class DownloadQueueResult(
+        val queuedCount: Int,
+        val skippedPages: Int,
+        val failures: List<String>
+    )
+
+    /**
+     * Validates and enqueues multiple direct HTTP files with Android DownloadManager.
+     * Web pages and protected platform URLs are never enqueued as if they were files.
+     */
+    suspend fun enqueueDownloadQueue(
+        context: Context,
+        rawLinks: List<String>,
+        requestHeaders: Map<String, String> = emptyMap()
+    ): DownloadQueueResult = withContext(Dispatchers.IO) {
+        var queued = 0
+        var skippedPages = 0
+        val failures = mutableListOf<String>()
+        val uniqueLinks = rawLinks.map(::normalizeUrl).filter { it.isNotBlank() }.distinct()
+
+        uniqueLinks.forEach { link ->
+            when (val result = verifyVideoBeforeDownload(link, requestHeaders)) {
+                is VideoVerificationResult.Valid -> {
+                    runCatching {
+                        downloadWithSystemManager(
+                            context = context,
+                            urlStr = result.directUrl,
+                            customFileName = result.fileName,
+                            mimeType = result.mimeType,
+                            requestHeaders = requestHeaders
+                        )
+                    }.onSuccess { queued++ }
+                        .onFailure { error ->
+                            failures += "${result.fileName}: ${error.localizedMessage ?: "تعذر إضافته إلى قائمة التنزيلات"}"
+                        }
+                }
+                is VideoVerificationResult.SocialWebPage -> skippedPages++
+                is VideoVerificationResult.Invalid -> failures += "${Uri.parse(link).host ?: link}: ${result.reason}"
+            }
+        }
+
+        DownloadQueueResult(queued, skippedPages, failures)
+    }
+
     fun requestPause() {
         isPauseRequested = true
     }
@@ -337,7 +381,7 @@ object RealMediaDownloader {
             } else contentType
             val fileName = suggestedName
                 ?: Uri.parse(currentUrl).lastPathSegment?.let(::sanitizeFileName)
-                ?: "CinemaX_\${System.currentTimeMillis()}.$finalExtension"
+                ?: "CinemaX_${System.currentTimeMillis()}.$finalExtension"
             val category = categoryFor(finalMime, finalExtension)
             val format = if (finalExtension.isNotBlank()) {
                 finalExtension.uppercase(Locale.ROOT)
@@ -368,7 +412,7 @@ object RealMediaDownloader {
                     isResumable = false,
                     server = null,
                     fileName = Uri.parse(trimmed).lastPathSegment?.let(::sanitizeFileName)
-                        ?: "CinemaX_\${System.currentTimeMillis()}.$extension",
+                        ?: "CinemaX_${System.currentTimeMillis()}.$extension",
                     category = categoryFor(mimeType, extension.orEmpty())
                 )
             } else {
@@ -624,7 +668,7 @@ object RealMediaDownloader {
             val mappedMime = if (finalMime == "application/octet-stream" && extension != "bin") {
                 mimeTypeForExtension(extension)
             } else finalMime
-            val finalFileName = hintedName ?: "CinemaX_\${System.currentTimeMillis()}.$extension"
+            val finalFileName = hintedName ?: "CinemaX_${System.currentTimeMillis()}.$extension"
             val savedPath = saveDownloadedFile(context, tempFile, finalFileName, mappedMime)
 
             // Cleanup temp file
@@ -667,10 +711,10 @@ object RealMediaDownloader {
         }
         val mimeType = resolver.getType(uri)?.takeIf { it.isNotBlank() } ?: "application/octet-stream"
         val fallbackExtension = MimeTypeMap.getSingleton().getExtensionFromMimeType(mimeType) ?: "bin"
-        val safeName = sanitizeFileName(displayName) ?: "CinemaX_\${System.currentTimeMillis()}.$fallbackExtension"
+        val safeName = sanitizeFileName(displayName) ?: "CinemaX_${System.currentTimeMillis()}.$fallbackExtension"
         val tempFile = File(
             context.cacheDir,
-            "share_import_\${System.currentTimeMillis()}_\${safeName.hashCode().toUInt().toString(16)}.tmp"
+            "share_import_${System.currentTimeMillis()}_${safeName.hashCode().toUInt().toString(16)}.tmp"
         )
         try {
             val input = resolver.openInputStream(uri)
@@ -702,7 +746,7 @@ object RealMediaDownloader {
         requestedName: String,
         mimeType: String
     ): String {
-        val name = sanitizeFileName(requestedName) ?: "CinemaX_\${System.currentTimeMillis()}.bin"
+        val name = sanitizeFileName(requestedName) ?: "CinemaX_${System.currentTimeMillis()}.bin"
         val mime = mimeType.takeIf { it.isNotBlank() } ?: "application/octet-stream"
         val isVideo = mime.startsWith("video/")
         val isAudio = mime.startsWith("audio/")
