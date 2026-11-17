@@ -82,8 +82,10 @@ data class CapturedVideoSource(
  */
 object WebVideoSnifferHelper {
 
-    fun isMediaStreamUrl(url: String): Boolean {
+    fun isMediaStreamUrl(url: String, mimeType: String? = null): Boolean {
         if (!url.startsWith("https://", true) && !url.startsWith("http://", true)) return false
+        val responseMime = mimeType?.substringBefore(';')?.trim()?.lowercase().orEmpty()
+        if (responseMime.startsWith("video/") || responseMime.startsWith("audio/")) return true
         val uri = Uri.parse(url)
         val host = uri.host?.lowercase().orEmpty()
         val path = uri.path?.lowercase().orEmpty()
@@ -143,8 +145,8 @@ fun WebVideoSnifferDialog(
     val captureUserAgent = remember(context) { WebSettings.getDefaultUserAgent(context) }
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
 
-    fun captureCandidate(url: String, pageUrl: String, userAgent: String) {
-        if (!WebVideoSnifferHelper.isMediaStreamUrl(url)) return
+    fun captureCandidate(url: String, pageUrl: String, userAgent: String, mimeType: String? = null) {
+        if (!WebVideoSnifferHelper.isMediaStreamUrl(url, mimeType)) return
         mainHandler.post {
             val headers = linkedMapOf(
                 "User-Agent" to userAgent,
@@ -385,15 +387,22 @@ fun WebVideoSnifferDialog(
                                         view: WebView?,
                                         request: WebResourceRequest?
                                     ): WebResourceResponse? {
+                                        // This callback runs on a WebView worker thread. Inspect the response MIME
+                                        // instead of relying only on URL suffixes: CDNs often use opaque URLs.
+                                        val response = super.shouldInterceptRequest(view, request)
                                         val mediaUrl = request?.url?.toString().orEmpty()
                                         if (mediaUrl.isNotBlank()) {
                                             val pageReferer = request?.requestHeaders?.entries
                                                 ?.firstOrNull { it.key.equals("Referer", true) }?.value
                                                 ?: latestPageUrl.get()
-                                            // Do not touch view.settings here: this callback is not on the UI thread.
-                                            captureCandidate(mediaUrl, pageReferer, captureUserAgent)
+                                            captureCandidate(
+                                                mediaUrl,
+                                                pageReferer,
+                                                captureUserAgent,
+                                                response?.mimeType
+                                            )
                                         }
-                                        return super.shouldInterceptRequest(view, request)
+                                        return response
                                     }
 
                                     override fun onLoadResource(view: WebView?, url: String?) {
