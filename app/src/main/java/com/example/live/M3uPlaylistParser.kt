@@ -227,11 +227,20 @@ object M3uPlaylistParser {
     }
 
     private fun attribute(line: String, name: String): String? {
-        val pattern = Regex(
-            """(?:^|\s)${Regex.escape(name)}\s*=s*"([^"]*)"""",
-            RegexOption.IGNORE_CASE
-        )
-        return pattern.find(line)?.groupValues?.getOrNull(1)?.trim()?.takeIf { it.isNotBlank() }
+        val key = "$name="
+        val index = line.indexOf(key, ignoreCase = true)
+        if (index < 0) return null
+        val valueStart = index + key.length
+        if (valueStart >= line.length) return null
+        val quote = line[valueStart]
+        val value = if (quote == '"') {
+            val valueEnd = line.indexOf('"', valueStart + 1)
+            if (valueEnd < 0) return null
+            line.substring(valueStart + 1, valueEnd)
+        } else {
+            line.substring(valueStart).takeWhile { !it.isWhitespace() && it != ',' }
+        }
+        return value.trim().takeIf { it.isNotBlank() }
     }
 
     private fun displayNameFromUrl(value: String, index: Int): String {

@@ -167,7 +167,7 @@ fun LiveStreamScreen(
 
     val countries = com.example.live.WorldChannelsDownloader.supportedCountries
 
-    val categories = listOf(
+    val baseCategories = listOf(
         "الكل",
         "المفضلة ❤️",
         "⚽ رياضة وكورة وبث مباشر",
@@ -185,6 +185,9 @@ fun LiveStreamScreen(
         "وثائقيات ومعرفة",
         "بث مخصص"
     )
+    val categories = remember(channels) {
+        (baseCategories + channels.map { it.category }.filter { it.isNotBlank() }).distinct()
+    }
 
     // Dynamic filtering by Tab (Country vs Category vs Favorites)
     val filtered = remember(channels, favoriteIds, activeTab, selectedCountryCode, selectedCategory, searchQuery) {
