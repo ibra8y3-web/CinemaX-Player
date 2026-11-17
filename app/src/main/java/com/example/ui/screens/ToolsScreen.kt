@@ -1202,10 +1202,13 @@ fun ToolsScreen(
                                                 isDownloadPaused = false
                                                 isDownloading = true
                                                 scope.launch {
+                                                    val savedMetadata = verificationResult as? com.example.media.RealMediaDownloader.VideoVerificationResult.Valid
                                                     com.example.media.RealMediaDownloader.downloadWithHttpEngine(
                                                         context = context,
-                                                        urlStr = downloadUrl.trim(),
-                                                        requestHeaders = downloadRequestHeaders
+                                                        urlStr = savedMetadata?.directUrl ?: downloadUrl.trim(),
+                                                        requestHeaders = downloadRequestHeaders,
+                                                        customFileName = savedMetadata?.fileName,
+                                                        mimeTypeHint = savedMetadata?.mimeType
                                                     ) { progress ->
                                                         scope.launch(Dispatchers.Main) {
                                                             downloadPercent = progress.percent.coerceAtLeast(0)
@@ -1230,7 +1233,7 @@ fun ToolsScreen(
                                                                 downloadPercent = 0
                                                                 downloadSpeedText = ""
                                                                 downloadEtaText = ""
-                                                                Toast.makeText(context, "تم استئناف واكتمال التحميل بنجاح في مجلد التحميلات والمعرض!", Toast.LENGTH_LONG).show()
+                                                                Toast.makeText(context, "تم استكمال تنزيل الملف وحفظه في المجلد المناسب.", Toast.LENGTH_LONG).show()
                                                             } else if (progress.errorMsg != null) {
                                                                 isDownloading = false
                                                                 isDownloadPaused = false
@@ -1258,8 +1261,16 @@ fun ToolsScreen(
                     if (!isDownloading && !isDownloadPaused) {
                         Button(
                             onClick = {
-                                val urlToDownload = com.example.media.RealMediaDownloader.normalizeUrl(downloadUrl)
-                                if (urlToDownload.isNotBlank()) {
+                                val pastedUrls = DownloadLinkAnalyzer.extractUrls(downloadUrl)
+                                val urlToDownload = pastedUrls.firstOrNull()
+                                    ?: com.example.media.RealMediaDownloader.normalizeUrl(downloadUrl)
+                                if (pastedUrls.size > 1) {
+                                    Toast.makeText(
+                                        context,
+                                        "لديك عدة روابط. استخدم زر إضافة إلى قائمة التنزيلات لتنزيلها بالخلفية.",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                } else if (urlToDownload.isNotBlank()) {
                                     scope.launch {
                                         try {
                                         // 1. Enforce Verification
@@ -1308,7 +1319,9 @@ fun ToolsScreen(
                                         com.example.media.RealMediaDownloader.downloadWithHttpEngine(
                                             context = context,
                                             urlStr = verifiedDirectUrl,
-                                            requestHeaders = downloadRequestHeaders
+                                            requestHeaders = downloadRequestHeaders,
+                                            customFileName = verified.fileName,
+                                            mimeTypeHint = verified.mimeType
                                         ) { progress ->
                                             scope.launch(Dispatchers.Main) {
                                                 downloadPercent = progress.percent.coerceAtLeast(0)
@@ -1334,7 +1347,7 @@ fun ToolsScreen(
                                                     downloadSpeedText = ""
                                                     downloadEtaText = ""
                                                     verificationResult = null
-                                                    Toast.makeText(context, "✅ تم اكتمال التحميل وحفظ الفيديو في المعرض والتنزيلات!", Toast.LENGTH_LONG).show()
+                                                    Toast.makeText(context, "✅ تم تنزيل الملف وحفظه في المجلد المناسب بنجاح.", Toast.LENGTH_LONG).show()
                                                 } else if (progress.errorMsg != null) {
                                                     isDownloading = false
                                                     isDownloadPaused = false
@@ -1361,67 +1374,97 @@ fun ToolsScreen(
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2EE6A6), contentColor = Color(0xFF0E1230)),
                             modifier = Modifier.fillMaxWidth().testTag("start_download_btn")
                         ) {
-                            Text("بدء التحميل المباشر مع شريط السرعة الحية 🚀", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Text("تنزيل الملف الآن مع السرعة الحية 🚀", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                         }
 
                         Spacer(modifier = Modifier.height(6.dp))
 
                         OutlinedButton(
                             onClick = {
-                                val urlToDownload = com.example.media.RealMediaDownloader.normalizeUrl(downloadUrl)
-                                if (urlToDownload.isNotBlank()) {
+                                val links = DownloadLinkAnalyzer.extractUrls(downloadUrl)
+                                if (links.isEmpty()) {
+                                    Toast.makeText(context, "ألصق رابط HTTP أو HTTPS صالحاً أولاً.", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    isVerifyingUrl = true
                                     scope.launch {
-                                        var currentVerification = verificationResult
-                                        if (currentVerification == null) {
-                                            isVerifyingUrl = true
-                                            currentVerification = com.example.media.RealMediaDownloader.verifyVideoBeforeDownload(urlToDownload, downloadRequestHeaders)
-                                            verificationResult = currentVerification
+                                        try {
+                                            if (links.size == 1) {
+                                                when (
+                                                    val check = com.example.media.RealMediaDownloader.verifyVideoBeforeDownload(
+                                                        links.first(),
+                                                        downloadRequestHeaders
+                                                    )
+                                                ) {
+                                                    is com.example.media.RealMediaDownloader.VideoVerificationResult.SocialWebPage -> {
+                                                        if (check.platform.equals("YouTube", ignoreCase = true)) {
+                                                            Toast.makeText(context, check.advice, Toast.LENGTH_LONG).show()
+                                                        } else {
+                                                            returnToDownloadAfterSniffer = true
+                                                            showDownloadDialog = false
+                                                            showSnifferDialog = true
+                                                            Toast.makeText(
+                                                                context,
+                                                                "تم فتح المستكشف. شغّل الوسائط، وسيظهر الملف المباشر فقط إذا أتاحه الموقع.",
+                                                                Toast.LENGTH_LONG
+                                                            ).show()
+                                                        }
+                                                    }
+                                                    is com.example.media.RealMediaDownloader.VideoVerificationResult.Invalid -> {
+                                                        Toast.makeText(context, check.reason, Toast.LENGTH_LONG).show()
+                                                    }
+                                                    is com.example.media.RealMediaDownloader.VideoVerificationResult.Valid -> {
+                                                        com.example.media.RealMediaDownloader.downloadWithSystemManager(
+                                                            context = context,
+                                                            urlStr = check.directUrl,
+                                                            customFileName = check.fileName,
+                                                            mimeType = check.mimeType,
+                                                            requestHeaders = downloadRequestHeaders
+                                                        )
+                                                        showDownloadDialog = false
+                                                        downloadUrl = ""
+                                                        verificationResult = null
+                                                        Toast.makeText(
+                                                            context,
+                                                            "أُضيف ${check.fileName} إلى مدير تنزيلات Android.",
+                                                            Toast.LENGTH_LONG
+                                                        ).show()
+                                                    }
+                                                }
+                                            } else {
+                                                val result = com.example.media.RealMediaDownloader.enqueueDownloadQueue(
+                                                    context = context,
+                                                    rawLinks = links,
+                                                    requestHeaders = downloadRequestHeaders
+                                                )
+                                                if (result.queuedCount > 0) {
+                                                    showDownloadDialog = false
+                                                    downloadUrl = ""
+                                                    verificationResult = null
+                                                }
+                                                val summary = buildString {
+                                                    append("تمت إضافة ${result.queuedCount} ملف إلى قائمة تنزيلات Android.")
+                                                    if (result.skippedPages > 0) append(" تم تجاوز ${result.skippedPages} رابط صفحة ويب أو منصة.")
+                                                    if (result.failures.isNotEmpty()) append(" تعذر إضافة ${result.failures.size} رابط؛ أول سبب: ${result.failures.first()}")
+                                                }
+                                                Toast.makeText(context, summary, Toast.LENGTH_LONG).show()
+                                            }
+                                        } catch (error: Exception) {
+                                            Toast.makeText(
+                                                context,
+                                                "تعذر إضافة التنزيل: ${error.localizedMessage ?: "تحقق من الرابط والاتصال"}",
+                                                Toast.LENGTH_LONG
+                                            ).show()
+                                        } finally {
                                             isVerifyingUrl = false
                                         }
-                                        if (currentVerification is com.example.media.RealMediaDownloader.VideoVerificationResult.SocialWebPage) {
-                                            val socialPage = currentVerification
-                                            if (socialPage.platform.equals("YouTube", ignoreCase = true)) {
-                                                isDownloading = false
-                                                isVerifyingUrl = false
-                                                Toast.makeText(context, socialPage.advice, Toast.LENGTH_LONG).show()
-                                            } else {
-                                                returnToDownloadAfterSniffer = true
-                                                showDownloadDialog = false
-                                                showSnifferDialog = true
-                                                Toast.makeText(context, "تم فتح المستكشف. شغّل الفيديو أولاً، وسيظهر الملف المباشر إذا أتاحه الموقع.", Toast.LENGTH_LONG).show()
-                                            }
-                                            return@launch
-                                        }
-
-                                        if (currentVerification is com.example.media.RealMediaDownloader.VideoVerificationResult.Invalid) {
-                                            Toast.makeText(context, currentVerification.reason, Toast.LENGTH_LONG).show()
-                                            return@launch
-                                        }
-                                        val verified = currentVerification as? com.example.media.RealMediaDownloader.VideoVerificationResult.Valid
-                                        if (verified == null) {
-                                            Toast.makeText(context, "تعذر تأكيد ملف الفيديو. لم يبدأ التنزيل.", Toast.LENGTH_LONG).show()
-                                            return@launch
-                                        }
-
-                                        try {
-                                            com.example.media.RealMediaDownloader.downloadWithSystemManager(context, verified.directUrl, requestHeaders = downloadRequestHeaders)
-                                            showDownloadDialog = false
-                                            downloadUrl = ""
-                                            verificationResult = null
-                                            Toast.makeText(context, "تم إرسال الملف المباشر إلى مدير تنزيلات النظام.", Toast.LENGTH_LONG).show()
-                                        } catch (e: Exception) {
-                                            Toast.makeText(context, "تعذر التنزيل بالنظام: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
-                                        }
                                     }
-                                } else {
-                                    Toast.makeText(context, "يرجى إدخال أو لصق رابط الفيديو أولاً!", Toast.LENGTH_SHORT).show()
                                 }
                             },
                             enabled = !isVerifyingUrl,
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier.fillMaxWidth().testTag("system_download_btn")
                         ) {
-                            Text("تنزيل عبر مدير تنزيلات النظام (DownloadManager)", color = Color(0xFF22E3FF), fontSize = 11.sp)
+                            Text("إضافة إلى قائمة التنزيلات بالخلفية (ملف واحد أو عدة روابط)", color = Color(0xFF22E3FF), fontSize = 11.sp)
                         }
                     }
                 }
