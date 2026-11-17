@@ -1,21 +1,12 @@
 package com.example.ui.screens
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -27,21 +18,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bolt
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.LiveTv
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Radio
-import androidx.compose.material.icons.filled.Security
-import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -59,7 +45,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -67,7 +52,6 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -76,318 +60,283 @@ import com.example.ui.NavTab
 import kotlinx.coroutines.delay
 
 /**
- * CinemaX Gateway / Entrance Screen (بوابة الدخول السينمائية الذكية)
- * Displayed upon launching the application, presenting features, system readiness,
- * and direct entrance routes into specific sections.
+ * Compact CinemaX welcome gateway.
+ * The primary actions and feature overview are kept inside one viewport on
+ * ordinary phone layouts; no long introductory scroll is required.
  */
 @Composable
 fun CinemaXGatewayScreen(
     onEnterApp: (initialTab: NavTab) -> Unit
 ) {
-    var countdownSeconds by remember { mutableIntStateOf(5) }
+    var countdownSeconds by remember { mutableIntStateOf(3) }
     var isAutoEnterActive by remember { mutableStateOf(true) }
 
-    // Pulsing and rotating cinema animations
-    val infiniteTransition = rememberInfiniteTransition(label = "gateway_pulse")
-    val pulseScale by infiniteTransition.animateFloat(
-        initialValue = 0.95f,
-        targetValue = 1.05f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1200, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "pulseScale"
-    )
-
-    val reelRotation by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(8000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "reelRotation"
-    )
-
-    // Optional 5-second smooth entrance timer
     LaunchedEffect(isAutoEnterActive) {
         if (isAutoEnterActive) {
             while (countdownSeconds > 0) {
-                delay(1000)
+                delay(1_000)
                 countdownSeconds -= 1
             }
-            onEnterApp(NavTab.VIDEOS)
+            if (isAutoEnterActive) onEnterApp(NavTab.VIDEOS)
         }
     }
 
-    Box(
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
             .background(
                 Brush.verticalGradient(
-                    colors = listOf(
-                        Color(0xFF0E1230),
-                        Color(0xFF141943),
-                        Color(0xFF0A1F3F)
-                    )
+                    listOf(Color(0xFF0B1028), Color(0xFF141943), Color(0xFF0A1F3F))
                 )
             )
     ) {
-        // Ambient background glow circles
-        Box(
-            modifier = Modifier
-                .size(280.dp)
-                .align(Alignment.TopCenter)
-                .padding(top = 40.dp)
-                .clip(CircleShape)
-                .background(Color(0x1522E3FF))
-        )
+        val compact = maxHeight < 680.dp
+        val sidePadding = if (maxWidth < 360.dp) 12.dp else 16.dp
+        val itemGap = if (compact) 5.dp else 7.dp
 
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .systemBarsPadding()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, vertical = 16.dp),
+                .padding(horizontal = sidePadding, vertical = if (compact) 6.dp else 9.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.SpaceBetween
+            verticalArrangement = Arrangement.spacedBy(itemGap)
         ) {
+            // Brand header
             Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Cinematic Hero Banner Backdrop with Glowing Reel Emblem
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(140.dp)
-                        .clip(RoundedCornerShape(18.dp))
-                        .border(1.dp, Color(0x4422E3FF), RoundedCornerShape(18.dp))
+                        .height(if (compact) 76.dp else 90.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .border(1.dp, Color(0x6622E3FF), RoundedCornerShape(16.dp))
                 ) {
                     Image(
                         painter = painterResource(id = R.drawable.img_cinemax_hero),
-                        contentDescription = "خلفية بوابة CinemaX Player السينمائية",
+                        contentDescription = "خلفية CinemaX Player",
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize()
                     )
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(
-                                Brush.verticalGradient(
-                                    colors = listOf(Color(0x550E1230), Color(0xBB0E1230))
-                                )
-                            )
-                    )
-                    // Cinematic Glowing Logo Reel centered on Banner
-                    Box(
-                        modifier = Modifier
-                            .size(76.dp)
-                            .align(Alignment.Center)
-                            .clip(CircleShape)
-                            .background(
-                                Brush.sweepGradient(
-                                    listOf(Color(0xFF22E3FF), Color(0xFFFFC857), Color(0xFFE040FB), Color(0xFF22E3FF))
-                                )
-                            )
-                            .padding(3.dp),
+                            .background(Color(0x880E1230)),
                         contentAlignment = Alignment.Center
                     ) {
                         Box(
                             modifier = Modifier
-                                .fillMaxSize()
+                                .size(if (compact) 58.dp else 66.dp)
                                 .clip(CircleShape)
-                                .background(Color(0xFF0E1230)),
+                                .background(
+                                    Brush.sweepGradient(
+                                        listOf(
+                                            Color(0xFF22E3FF),
+                                            Color(0xFFFFC857),
+                                            Color(0xFFE040FB),
+                                            Color(0xFF22E3FF)
+                                        )
+                                    )
+                                )
+                                .padding(3.dp),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Movie,
-                                contentDescription = "CinemaX Logo",
-                                tint = Color(0xFF22E3FF),
+                            Box(
                                 modifier = Modifier
-                                    .size(40.dp)
-                                    .rotate(reelRotation)
-                            )
+                                    .fillMaxSize()
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF0E1230)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.PlayArrow,
+                                    contentDescription = "شعار CinemaX Player",
+                                    tint = Color(0xFF22E3FF),
+                                    modifier = Modifier.size(if (compact) 34.dp else 40.dp)
+                                )
+                            }
                         }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
-
-                // App Branding Title
                 Text(
                     text = "CinemaX Player",
                     color = Color.White,
-                    fontSize = 26.sp,
+                    fontSize = if (compact) 22.sp else 25.sp,
                     fontWeight = FontWeight.ExtraBold,
-                    letterSpacing = 1.sp
+                    letterSpacing = 0.5.sp
                 )
-
                 Text(
-                    text = "مشغل الوسائط والبث المباشر الذكي فائق الأداء",
+                    text = "مشغّل الوسائط والبث المباشر",
                     color = Color(0xFF22E3FF),
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier.padding(top = 4.dp)
+                    fontSize = if (compact) 10.sp else 11.sp,
+                    fontWeight = FontWeight.Medium
                 )
+            }
 
-                // Readiness Badge
-                Surface(
-                    color = Color(0x332EE6A6),
-                    shape = RoundedCornerShape(20.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x6600E676)),
-                    modifier = Modifier.padding(top = 10.dp)
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = Color(0x222EE6A6),
+                shape = RoundedCornerShape(18.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x772EE6A6))
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = if (compact) 5.dp else 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
                 ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(7.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFF2EE6A6))
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "المحرك السينمائي v2.5 جاهز 100% للتشغيل الفوري",
-                            color = Color(0xFF2EE6A6),
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
+                    Box(
+                        modifier = Modifier
+                            .size(7.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF2EE6A6))
+                    )
+                    Spacer(Modifier.width(7.dp))
+                    Text(
+                        text = "مكتبة فيديو وصوت وأدوات وسائط في تطبيق واحد",
+                        color = Color(0xFF5CE6B5),
+                        fontSize = if (compact) 9.sp else 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
+            }
 
-                Spacer(modifier = Modifier.height(20.dp))
-
-                // Feature Highlights Gateway Cards
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
+            // Concise feature overview in two rows
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(itemGap)
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(itemGap)) {
                     GatewayFeatureCard(
                         icon = Icons.Default.Movie,
                         iconTint = Color(0xFF22E3FF),
-                        title = "مشغل 4K وفلاتر ألوان حية (Cinema HDR)",
-                        desc = "تشغيل سلس لكافة الصيغ مع فلاتر AMOLED وWarm Cinema وNight Shield"
+                        title = "مشغّل الفيديو",
+                        desc = "ترجمات · PiP · Cast · إيماءات",
+                        compact = compact,
+                        modifier = Modifier.weight(1f)
                     )
-
-                    GatewayFeatureCard(
-                        icon = Icons.Default.Radio,
-                        iconTint = Color(0xFFFFC857),
-                        title = "إذاعات وبث صوتي مباشر (+45,000 محطة)",
-                        desc = "آلاف المحطات الإذاعية الحقيقية من مصر وفرنسا وأوروبا وقرآن كريم موفر للباقة"
-                    )
-
-                    GatewayFeatureCard(
-                        icon = Icons.Default.LiveTv,
-                        iconTint = Color(0xFFFF6B8B),
-                        title = "دليل القنوات الحية والبث التلفزيوني",
-                        desc = "قنوات إخبارية ورياضية ووثائقية حقيقية مع فاحص ذكي للروابط الحية"
-                    )
-
                     GatewayFeatureCard(
                         icon = Icons.Default.Headphones,
                         iconTint = Color(0xFF9D7BFF),
-                        title = "استوديو الموسيقى وقص النغمات والمشاركة",
-                        desc = "مؤثرات بصرية حركية، موازن صوت Equalizer، وقص الأغاني ومشاركتها فوراً"
+                        title = "الموسيقى والصوت",
+                        desc = "تشغيل بالخلفية · Equalizer",
+                        compact = compact,
+                        modifier = Modifier.weight(1f)
                     )
-
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(itemGap)) {
+                    GatewayFeatureCard(
+                        icon = Icons.Default.LiveTv,
+                        iconTint = Color(0xFFFF6B8B),
+                        title = "التلفزيون والراديو",
+                        desc = "مصادر وقنوات ومحطات",
+                        compact = compact,
+                        modifier = Modifier.weight(1f)
+                    )
+                    GatewayFeatureCard(
+                        icon = Icons.Default.Widgets,
+                        iconTint = Color(0xFFFFC857),
+                        title = "أدوات الوسائط",
+                        desc = "قص · ضغط · استخراج · GIF",
+                        compact = compact,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(itemGap)) {
                     GatewayFeatureCard(
                         icon = Icons.Default.Bolt,
                         iconTint = Color(0xFF2EE6A6),
-                        title = "المزامنة اللامركزية ومشاركة Wi-Fi",
-                        desc = "استعادة السجل والمفضلة برمز سحابي موحد PIN وبث الفيديوهات للكمبيوتر"
+                        title = "المشاركة والمزامنة",
+                        desc = "Wi-Fi · نسخ واستعادة",
+                        compact = compact,
+                        modifier = Modifier.weight(1f)
                     )
-                }
-
-                Spacer(modifier = Modifier.height(18.dp))
-
-                // Fast Direct Navigation Chips
-                Text(
-                    text = "أو اختر قسماً للدخول المباشر إليه:",
-                    color = Color(0xFFA9B4D6),
-                    fontSize = 11.sp,
-                    modifier = Modifier.padding(bottom = 8.dp)
-                )
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    DirectNavChip("فيديوهات 🎬", NavTab.VIDEOS, Modifier.weight(1f)) {
-                        isAutoEnterActive = false
-                        onEnterApp(it)
-                    }
-                    DirectNavChip("موسيقى 🎵", NavTab.MUSIC, Modifier.weight(1f)) {
-                        isAutoEnterActive = false
-                        onEnterApp(it)
-                    }
-                    DirectNavChip("قنوات 📺", NavTab.LIVE, Modifier.weight(1f)) {
-                        isAutoEnterActive = false
-                        onEnterApp(it)
-                    }
-                    DirectNavChip("راديو 📻", NavTab.RADIO, Modifier.weight(1f)) {
-                        isAutoEnterActive = false
-                        onEnterApp(it)
-                    }
-                    DirectNavChip("إسلاميات 🕌", NavTab.ISLAMIC, Modifier.weight(1f)) {
-                        isAutoEnterActive = false
-                        onEnterApp(it)
-                    }
+                    GatewayFeatureCard(
+                        icon = Icons.Default.Radio,
+                        iconTint = Color(0xFF22E3FF),
+                        title = "المركز الإسلامي",
+                        desc = "قرآن · صلاة · قبلة · أذكار",
+                        compact = compact,
+                        modifier = Modifier.weight(1f)
+                    )
                 }
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Text(
+                text = "دخول سريع إلى القسم",
+                color = Color(0xFFA9B4D6),
+                fontSize = if (compact) 9.sp else 10.sp,
+                fontWeight = FontWeight.Medium
+            )
 
-            // Primary Entrance Action Button
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.fillMaxWidth()
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                Button(
-                    onClick = {
-                        isAutoEnterActive = false
-                        onEnterApp(NavTab.VIDEOS)
-                    },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF22E3FF),
-                        contentColor = Color(0xFF0E1230)
-                    ),
-                    shape = RoundedCornerShape(14.dp),
-                    contentPadding = PaddingValues(horizontal = 24.dp, vertical = 14.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("enter_cinema_gateway_btn")
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(22.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = if (isAutoEnterActive && countdownSeconds > 0)
-                                "دخول المشغل الآن (تلقائي خلال $countdownSeconds ثوانٍ) 🚀"
-                            else
-                                "دخول مشغل CinemaX Player 🚀",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp
-                        )
-                    }
+                DirectNavChip("فيديو", NavTab.VIDEOS, Modifier.weight(1f), compact) {
+                    isAutoEnterActive = false
+                    onEnterApp(it)
                 }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // Pause timer link
-                if (isAutoEnterActive) {
-                    Text(
-                        text = "اضغط هنا لإلغاء الدخول التلقائي والبقاء في بوابة الترحيب",
-                        color = Color(0xFFA9B4D6),
-                        fontSize = 10.sp,
-                        modifier = Modifier
-                            .clickable { isAutoEnterActive = false }
-                            .padding(4.dp)
-                    )
+                DirectNavChip("موسيقى", NavTab.MUSIC, Modifier.weight(1f), compact) {
+                    isAutoEnterActive = false
+                    onEnterApp(it)
+                }
+                DirectNavChip("قنوات", NavTab.LIVE, Modifier.weight(1f), compact) {
+                    isAutoEnterActive = false
+                    onEnterApp(it)
+                }
+                DirectNavChip("راديو", NavTab.RADIO, Modifier.weight(1f), compact) {
+                    isAutoEnterActive = false
+                    onEnterApp(it)
+                }
+                DirectNavChip("إسلاميات", NavTab.ISLAMIC, Modifier.weight(1f), compact) {
+                    isAutoEnterActive = false
+                    onEnterApp(it)
                 }
             }
+
+            Button(
+                onClick = {
+                    isAutoEnterActive = false
+                    onEnterApp(NavTab.VIDEOS)
+                },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFF22E3FF),
+                    contentColor = Color(0xFF0E1230)
+                ),
+                shape = RoundedCornerShape(13.dp),
+                contentPadding = PaddingValues(horizontal = 18.dp, vertical = if (compact) 10.dp else 12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("enter_cinema_gateway_btn")
+            ) {
+                Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(7.dp))
+                Text(
+                    text = if (isAutoEnterActive && countdownSeconds > 0)
+                        "دخول المشغّل الآن · تلقائي خلال $countdownSeconds ثوانٍ"
+                    else
+                        "دخول CinemaX Player",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = if (compact) 12.sp else 13.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            Text(
+                text = if (isAutoEnterActive) "إلغاء الدخول التلقائي والبقاء هنا" else "اختر أي قسم من الأزرار بالأعلى",
+                color = Color(0xFFA9B4D6),
+                fontSize = 9.sp,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .clickable { isAutoEnterActive = false }
+                    .padding(horizontal = 8.dp, vertical = 2.dp)
+            )
         }
     }
 }
@@ -397,31 +346,48 @@ private fun GatewayFeatureCard(
     icon: ImageVector,
     iconTint: Color,
     title: String,
-    desc: String
+    desc: String,
+    compact: Boolean,
+    modifier: Modifier = Modifier
 ) {
     Card(
-        shape = RoundedCornerShape(12.dp),
+        modifier = modifier.height(if (compact) 49.dp else 56.dp),
+        shape = RoundedCornerShape(11.dp),
         colors = CardDefaults.cardColors(containerColor = Color(0xFF131A2A)),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF272D66)),
-        modifier = Modifier.fillMaxWidth()
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF272D66))
     ) {
         Row(
-            modifier = Modifier.padding(10.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 7.dp, vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
                 modifier = Modifier
-                    .size(34.dp)
+                    .size(if (compact) 28.dp else 32.dp)
                     .clip(RoundedCornerShape(8.dp))
                     .background(iconTint.copy(alpha = 0.15f)),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(18.dp))
+                Icon(icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(17.dp))
             }
-            Spacer(modifier = Modifier.width(10.dp))
+            Spacer(Modifier.width(7.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
-                Text(desc, color = Color(0xFFA9B4D6), fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    text = title,
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = if (compact) 9.sp else 10.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = desc,
+                    color = Color(0xFFA9B4D6),
+                    fontSize = if (compact) 7.sp else 8.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
         }
     }
@@ -432,24 +398,25 @@ private fun DirectNavChip(
     label: String,
     targetTab: NavTab,
     modifier: Modifier = Modifier,
+    compact: Boolean,
     onClick: (NavTab) -> Unit
 ) {
     Surface(
-        color = Color(0xFF272D66),
+        color = Color(0xFF20285A),
         shape = RoundedCornerShape(8.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x4422E3FF)),
-        modifier = modifier.clickable { onClick(targetTab) }
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x6622E3FF)),
+        modifier = modifier
+            .height(if (compact) 31.dp else 35.dp)
+            .clickable { onClick(targetTab) }
     ) {
-        Box(
-            modifier = Modifier.padding(vertical = 8.dp),
-            contentAlignment = Alignment.Center
-        ) {
+        Box(contentAlignment = Alignment.Center) {
             Text(
                 text = label,
                 color = Color.White,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center
+                fontSize = if (compact) 8.sp else 9.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
     }
