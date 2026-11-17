@@ -1,6 +1,8 @@
 package com.example.ui.screens
 
 import com.example.ui.theme.cinemaBackground
+import com.example.IncomingShareRequest
+import com.example.media.DownloadLinkAnalyzer
 
 import com.example.sync.CinemaXSyncDialog
 import android.content.ClipData
@@ -93,6 +95,7 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -136,6 +139,8 @@ fun ToolsScreen(
     onOpenPrayerAlarms: () -> Unit = {},
     section: ToolsSection = ToolsSection.ALL,
     onOpenVault: () -> Unit = {},
+    incomingShareRequest: IncomingShareRequest? = null,
+    onConsumeIncomingShare: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -851,6 +856,45 @@ fun ToolsScreen(
     var isDownloadPaused by remember { mutableStateOf(false) }
     var isVerifyingUrl by remember { mutableStateOf(false) }
     var verificationResult by remember { mutableStateOf<com.example.media.RealMediaDownloader.VideoVerificationResult?>(null) }
+    var handledShareRequestId by remember { mutableStateOf<Long?>(null) }
+
+    LaunchedEffect(incomingShareRequest?.id) {
+        val request = incomingShareRequest ?: return@LaunchedEffect
+        if (handledShareRequestId == request.id) return@LaunchedEffect
+        handledShareRequestId = request.id
+
+        val sharedUrls = DownloadLinkAnalyzer.extractUrls(request.text.orEmpty())
+        if (sharedUrls.isNotEmpty()) {
+            downloadUrl = sharedUrls.joinToString("\n")
+            downloadRequestHeaders = emptyMap()
+            verificationResult = null
+            showDownloadDialog = true
+        }
+
+        if (request.uris.isNotEmpty()) {
+            scope.launch {
+                var imported = 0
+                val failures = mutableListOf<String>()
+                request.uris.forEach { sharedUri ->
+                    runCatching {
+                        com.example.media.RealMediaDownloader.importSharedContent(context, sharedUri)
+                    }.onSuccess { imported++ }
+                        .onFailure { failures += (it.localizedMessage ?: "تعذر استيراد ملف") }
+                }
+                val message = when {
+                    imported > 0 && failures.isEmpty() -> "تم استيراد $imported ملف إلى مجلدات CinemaX العامة."
+                    imported > 0 -> "تم استيراد $imported ملف، وتعذر استيراد ${failures.size} ملف."
+                    else -> failures.firstOrNull() ?: "تعذر استيراد الملفات المرسلة."
+                }
+                Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                if (imported > 0) onMediaChanged()
+            }
+        } else if (sharedUrls.isEmpty()) {
+            Toast.makeText(context, "المشاركة لا تحتوي على رابط HTTP أو ملف يمكن استيراده.", Toast.LENGTH_LONG).show()
+        }
+
+        onConsumeIncomingShare()
+    }
 
     if (showDownloadDialog) {
         AlertDialog(
@@ -870,13 +914,13 @@ fun ToolsScreen(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.CloudDownload, contentDescription = null, tint = Color(0xFF2EE6A6))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("التحميل الذكي والتحقق من الفيديوهات", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text("مركز التنزيل العالمي", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 }
             },
             text = {
                 Column {
                     Text(
-                        text = "ضع رابط ملف فيديو مباشر. إذا لصقت رابط صفحة تواصل، افتح المستكشف وسجّل الدخول بنفسك ثم شغّل الفيديو. بعض المواقع لا تتيح ملفاً قابلاً للتنزيل.",
+                        text = "الصق رابط ملف أو صفحة ويب. يفحص CinemaX نوع الملف واسمه وحجمه، ويحوّل صفحات المنصات إلى المستكشف عند الحاجة. ويمكنك مشاركة ملف من أي تطبيق إلى CinemaX مباشرة.",
                         color = Color(0xFFA9B4D6),
                         fontSize = 12.sp,
                         modifier = Modifier.padding(bottom = 10.dp)
@@ -893,8 +937,9 @@ fun ToolsScreen(
                                 downloadRequestHeaders = emptyMap()
                                 verificationResult = null
                             },
-                            placeholder = { Text("https://example.com/video.mp4", color = Color(0xFF8B96BD), fontSize = 11.sp) },
-                            singleLine = true,
+                            placeholder = { Text("رابط فيديو أو PDF أو ZIP أو أي ملف مدعوم", color = Color(0xFF8B96BD), fontSize = 11.sp) },
+                            minLines = 1,
+                            maxLines = 3,
                             enabled = !isDownloading && !isDownloadPaused,
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedTextColor = Color.White,
@@ -918,7 +963,7 @@ fun ToolsScreen(
                                         verificationResult = null
                                         Toast.makeText(context, "تم لصق الرابط بنجاح", Toast.LENGTH_SHORT).show()
                                     } else {
-                                        Toast.makeText(context, "الحافظة فارغة! انسخ رابط فيديو أولاً", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(context, "الحافظة فارغة! انسخ رابط ملف أو صفحة أولاً", Toast.LENGTH_SHORT).show()
                                     }
                                 } catch (_: Exception) {
                                     Toast.makeText(context, "تعذر الوصول للحافظة", Toast.LENGTH_SHORT).show()
@@ -959,7 +1004,7 @@ fun ToolsScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("فحص صحة الفيديو قبل التحميل:", color = Color(0xFFA9B4D6), fontSize = 11.sp)
+                            Text("تحليل الرابط والتحقق من الملف:", color = Color(0xFFA9B4D6), fontSize = 11.sp)
                             OutlinedButton(
                                 onClick = {
                                     isVerifyingUrl = true
@@ -981,7 +1026,7 @@ fun ToolsScreen(
                                 } else {
                                     Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF22E3FF), modifier = Modifier.size(14.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
-                                    Text("تحقق من الفيديو 🔍", fontSize = 11.sp, color = Color(0xFF22E3FF), fontWeight = FontWeight.Bold)
+                                    Text("حلّل الرابط 🔍", fontSize = 11.sp, color = Color(0xFF22E3FF), fontWeight = FontWeight.Bold)
                                 }
                             }
                         }
@@ -1001,10 +1046,11 @@ fun ToolsScreen(
                                         Row(verticalAlignment = Alignment.CenterVertically) {
                                             Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF2EE6A6), modifier = Modifier.size(16.dp))
                                             Spacer(modifier = Modifier.width(6.dp))
-                                            Text("تم التعرف على ملف وسائط مباشر", color = Color(0xFF2EE6A6), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                            Text("تم التحقق من ملف قابل للتنزيل", color = Color(0xFF2EE6A6), fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                         }
                                         Spacer(modifier = Modifier.height(4.dp))
-                                        Text("الصيغة: ${res.format}", color = Color.White, fontSize = 11.sp)
+                                        Text("النوع: ${res.category} · ${res.format}", color = Color.White, fontSize = 11.sp)
+                                        Text("اسم الملف: ${res.fileName}", color = Color(0xFFB7C5F5), fontSize = 11.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                                         Text("الحجم: ${res.formattedSize}", color = Color(0xFF81C784), fontSize = 11.sp)
                                         if (res.isResumable) {
                                             Text("استئناف التحميل: مدعوم من السيرفر (Range Request)", color = Color(0xFF80CBC4), fontSize = 10.sp)
@@ -1063,7 +1109,7 @@ fun ToolsScreen(
                                         Row(verticalAlignment = Alignment.CenterVertically) {
                                             Icon(Icons.Default.Warning, contentDescription = null, tint = Color(0xFFFF6B8B), modifier = Modifier.size(16.dp))
                                             Spacer(modifier = Modifier.width(6.dp))
-                                            Text("تنبيه: الرابط لا يحتوي على فيديو حقيقي!", color = Color(0xFFFF6B8B), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                            Text("تعذر اعتماد الرابط كملف قابل للتنزيل", color = Color(0xFFFF6B8B), fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                         }
                                         Spacer(modifier = Modifier.height(4.dp))
                                         Text(res.reason, color = Color(0xFFFFCDD2), fontSize = 11.sp)
