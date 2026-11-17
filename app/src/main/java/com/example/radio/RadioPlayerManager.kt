@@ -311,12 +311,15 @@ class RadioPlayerManager(private val context: Context) {
 
     /** Explicit pause used when another audio app inside CinemaX takes audio focus. */
     fun pauseForExternalAudio() {
-        val player = exoPlayer ?: return
-        if (player.isPlaying || player.playWhenReady) {
+        autoRetryJob?.cancel()
+        wasPlayingBeforeNetworkLost = false
+        val player = exoPlayer
+        if (player != null && (player.isPlaying || player.playWhenReady)) {
             player.pause()
             player.playWhenReady = false
         }
         _isLoading.value = false
+        _playbackError.value = null
         stopDataTracker()
         updateForegroundService()
     }
@@ -333,6 +336,8 @@ class RadioPlayerManager(private val context: Context) {
             return
         }
 
+        autoRetryJob?.cancel()
+        wasPlayingBeforeNetworkLost = false
         initPlayer()
         val player = exoPlayer ?: return
         if (player.playbackState == Player.STATE_IDLE || player.playerError != null || player.mediaItemCount == 0) {
