@@ -151,6 +151,7 @@ fun ToolsScreen(
     var showDuasScreen by remember { mutableStateOf(false) }
     var showDownloadDialog by remember { mutableStateOf(false) }
     var downloadUrl by remember { mutableStateOf("") }
+    var downloadRequestHeaders by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var isDownloading by remember { mutableStateOf(false) }
     var showSnifferDialog by remember { mutableStateOf(false) }
     var showDuplicateCleanerDialog by remember { mutableStateOf(false) }
@@ -374,7 +375,7 @@ fun ToolsScreen(
                 icon = Icons.Default.CloudDownload,
                 iconTint = Color(0xFF2EE6A6),
                 title = "التحميل المباشر وحفظ المحتوى دون اتصال",
-                subtitle = "تنزيل أي فيديو مباشر من رابط الويب وحفظه داخل الجهاز",
+                subtitle = "تنزيل ملفات الفيديو المباشرة المدعومة وحفظها في الجهاز",
                 action = {
                     Button(
                         onClick = { showDownloadDialog = true },
@@ -609,7 +610,7 @@ fun ToolsScreen(
                 icon = Icons.Default.Language,
                 iconTint = Color(0xFF22E3FF),
                 title = "المستكشف الذكي لالتقاط وتنزيل فيديوهات الويب (Web Video Sniffer)",
-                subtitle = "تصفح أي موقع (Facebook, TikTok, Instagram والمواقع الأخرى) والتقاط روابط MP4 المباشرة تلقائياً وتحميلها بدون أخطاء السيرفر (400)",
+                subtitle = "تصفح صفحات الويب، ثم التقاط ملفات الفيديو المباشرة التي يتيحها الموقع للمتصفح مع بيانات الجلسة عند توفرها",
                 action = {
                     Button(
                         onClick = { showSnifferDialog = true },
@@ -874,7 +875,7 @@ fun ToolsScreen(
             text = {
                 Column {
                     Text(
-                        text = "ضع رابط الفيديو المباشر. يقوم النظام تلقائياً بفحص الرابط والتحقق من أنه ملف فيديو حقيقي وليس صفحة ويب وهمية قبل استهلاك أي باقة:",
+                        text = "ضع رابط ملف فيديو مباشر. إذا لصقت رابط صفحة تواصل، افتح المستكشف وسجّل الدخول بنفسك ثم شغّل الفيديو. بعض المواقع لا تتيح ملفاً قابلاً للتنزيل.",
                         color = Color(0xFFA9B4D6),
                         fontSize = 12.sp,
                         modifier = Modifier.padding(bottom = 10.dp)
@@ -888,6 +889,7 @@ fun ToolsScreen(
                             value = downloadUrl,
                             onValueChange = {
                                 downloadUrl = it
+                                downloadRequestHeaders = emptyMap()
                                 verificationResult = null
                             },
                             placeholder = { Text("https://example.com/video.mp4", color = Color(0xFF8B96BD), fontSize = 11.sp) },
@@ -911,6 +913,7 @@ fun ToolsScreen(
                                     val clip = clipboard?.primaryClip?.getItemAt(0)?.text?.toString()
                                     if (!clip.isNullOrBlank()) {
                                         downloadUrl = clip.trim()
+                                        downloadRequestHeaders = emptyMap()
                                         verificationResult = null
                                         Toast.makeText(context, "تم لصق الرابط بنجاح", Toast.LENGTH_SHORT).show()
                                     } else {
@@ -940,7 +943,7 @@ fun ToolsScreen(
                     ) {
                         Icon(Icons.Default.Language, contentDescription = null, tint = Color(0xFF22E3FF), modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("المستكشف الذكي (Web Video Sniffer) لتخطي حظر السيرفر 🌐", fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                        Text("المستكشف الذكي لالتقاط ملفات الفيديو المباشرة المتاحة 🌐", fontSize = 11.sp, fontWeight = FontWeight.Medium)
                     }
 
                     // Verification Check Button & Status
@@ -957,7 +960,7 @@ fun ToolsScreen(
                                     isVerifyingUrl = true
                                     verificationResult = null
                                     scope.launch {
-                                        val result = com.example.media.RealMediaDownloader.verifyVideoBeforeDownload(downloadUrl)
+                                        val result = com.example.media.RealMediaDownloader.verifyVideoBeforeDownload(downloadUrl, downloadRequestHeaders)
                                         verificationResult = result
                                         isVerifyingUrl = false
                                     }
@@ -993,7 +996,7 @@ fun ToolsScreen(
                                         Row(verticalAlignment = Alignment.CenterVertically) {
                                             Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF2EE6A6), modifier = Modifier.size(16.dp))
                                             Spacer(modifier = Modifier.width(6.dp))
-                                            Text("تم التحقق: فيديو حقيقي معتمد 100%", color = Color(0xFF2EE6A6), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                            Text("تم التعرف على ملف وسائط مباشر", color = Color(0xFF2EE6A6), fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                         }
                                         Spacer(modifier = Modifier.height(4.dp))
                                         Text("الصيغة: ${res.format}", color = Color.White, fontSize = 11.sp)
@@ -1138,7 +1141,8 @@ fun ToolsScreen(
                                                 scope.launch {
                                                     com.example.media.RealMediaDownloader.downloadWithHttpEngine(
                                                         context = context,
-                                                        urlStr = downloadUrl.trim()
+                                                        urlStr = downloadUrl.trim(),
+                                                        requestHeaders = downloadRequestHeaders
                                                     ) { progress ->
                                                         scope.launch(Dispatchers.Main) {
                                                             downloadPercent = progress.percent.coerceAtLeast(0)
@@ -1197,7 +1201,7 @@ fun ToolsScreen(
                                         var currentVerification = verificationResult
                                         if (currentVerification == null) {
                                             isVerifyingUrl = true
-                                            currentVerification = com.example.media.RealMediaDownloader.verifyVideoBeforeDownload(urlToDownload)
+                                            currentVerification = com.example.media.RealMediaDownloader.verifyVideoBeforeDownload(urlToDownload, downloadRequestHeaders)
                                             verificationResult = currentVerification
                                             isVerifyingUrl = false
                                         }
@@ -1223,7 +1227,8 @@ fun ToolsScreen(
 
                                         com.example.media.RealMediaDownloader.downloadWithHttpEngine(
                                             context = context,
-                                            urlStr = directUrl
+                                            urlStr = directUrl,
+                                            requestHeaders = downloadRequestHeaders
                                         ) { progress ->
                                             scope.launch(Dispatchers.Main) {
                                                 downloadPercent = progress.percent.coerceAtLeast(0)
@@ -1291,11 +1296,11 @@ fun ToolsScreen(
                                         val directUrl = (currentVerification as? com.example.media.RealMediaDownloader.VideoVerificationResult.Valid)?.directUrl ?: urlToDownload
 
                                         try {
-                                            com.example.media.RealMediaDownloader.downloadWithSystemManager(context, directUrl)
+                                            com.example.media.RealMediaDownloader.downloadWithSystemManager(context, directUrl, requestHeaders = downloadRequestHeaders)
                                             showDownloadDialog = false
                                             downloadUrl = ""
                                             verificationResult = null
-                                            Toast.makeText(context, "تم بدء التحميل الفعلي عبر مدير تنزيلات النظام!", Toast.LENGTH_LONG).show()
+                                            Toast.makeText(context, "تم إرسال الملف المباشر إلى مدير تنزيلات النظام.", Toast.LENGTH_LONG).show()
                                         } catch (e: Exception) {
                                             Toast.makeText(context, "تعذر التنزيل بالنظام: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
                                         }
@@ -1338,8 +1343,9 @@ fun ToolsScreen(
     if (showSnifferDialog) {
         WebVideoSnifferDialog(
             initialUrl = if (downloadUrl.isNotBlank()) com.example.media.RealMediaDownloader.normalizeUrl(downloadUrl) else "https://www.facebook.com",
-            onVideoFound = { directUrl: String ->
-                downloadUrl = directUrl
+            onVideoFound = { source: com.example.media.CapturedVideoSource ->
+                downloadUrl = source.url
+                downloadRequestHeaders = source.requestHeaders
                 verificationResult = null
                 showSnifferDialog = false
                 showDownloadDialog = true

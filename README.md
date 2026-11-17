@@ -18,7 +18,6 @@
 
 <p>
   <a href="https://github.com/ibra8y3-web/CinemaX-Player/actions">البناء والتنزيل</a> ·
-  <a href="#screenshots">صور التطبيق</a> ·
   <a href="#features">المميزات</a> ·
   <a href="#build">طريقة البناء</a>
 </p>
@@ -48,28 +47,6 @@
 | مشغّل الوسائط | AndroidX Media3 1.5.1 |
 | قاعدة البيانات | Room 2.7.0 |
 | نظام البناء | Android Gradle Plugin 9.1.1 · Gradle 9.3.1 |
-
----
-
-## <a id="screenshots"></a> صور من داخل التطبيق
-
-الصور التالية من مجلد لقطات المشروع، ويمكن استبدالها أو إضافة لقطات أحدث إلى <code>docs/screenshots/</code> عند تحديث الواجهات.
-
-<div align="center">
-
-| مشغّل الفيديو والبث المباشر | قص وتحرير الفيديو |
-|:---:|:---:|
-| <img src="docs/screenshots/player_live_tv.jpg" alt="CinemaX video player and live TV" width="340" /> | <img src="docs/screenshots/video_trimmer.jpg" alt="CinemaX video trimmer" width="340" /> |
-
-| استوديو التقاط الصور | استخراج الصوت |
-|:---:|:---:|
-| <img src="docs/screenshots/snapshot_studio.jpg" alt="CinemaX snapshot studio" width="340" /> | <img src="docs/screenshots/audio_extractor.jpg" alt="CinemaX audio extractor" width="340" /> |
-
-| فاحص معلومات الوسائط |
-|:---:|
-| <img src="docs/screenshots/codec_inspector.jpg" alt="CinemaX codec inspector" width="340" /> |
-
-</div>
 
 ---
 
@@ -127,13 +104,13 @@
 | Video to GIF | تحويل مقطع محدد إلى GIF |
 | Codec Inspector | قراءة معلومات الفيديو والصوت مثل الدقة والترميز والمدة ومعدل الإطارات |
 | Ringtone Maker | قص مقطع صوتي وتجهيزه كنغمة |
-| Media Downloader | التحقق من روابط الوسائط وتنزيل الملفات المباشرة المدعومة |
-| Web Video Sniffer | مراقبة طلبات صفحة الويب لاكتشاف روابط الوسائط |
+| Media Downloader | التحقق من روابط الوسائط وتنزيل ملفات الفيديو المباشرة المدعومة مع تمرير بيانات الجلسة |
+| Web Video Sniffer | تصفح صفحة الويب والتقاط ملفات الفيديو المباشرة التي يتيحها الموقع للمتصفح |
 | Duplicate Cleaner | اكتشاف ملفات الوسائط المتكررة ومراجعتها قبل الحذف |
 | Data Saver & Ping | تقدير استهلاك البيانات واختبار استجابة رابط/خادم |
 | Local Wi-Fi Share | تشغيل خادم مشاركة محلي للوصول إلى الفيديوهات عبر الشبكة المحلية |
 
-> ملاحظة: نجاح التنزيل أو تشغيل البث يعتمد على نوع الرابط، وسياسات الموقع المصدر، وتوفر الاتصال. لا يعني وجود أداة اكتشاف الروابط أن كل منصة خارجية تسمح بالتنزيل.
+> **حدود التنزيل:** يدعم التطبيق ملفات الفيديو المباشرة التي يسمح الخادم بقراءتها (مثل MP4 وWebM) مع تمرير بيانات جلسة المتصفح عند توفرها. روابط الصفحات ليست ملفات فيديو، وقوائم HLS/DASH تحتاج مدير تنزيلات بث منفصلاً. لا يتجاوز التطبيق DRM أو تسجيل الدخول أو قيود YouTube/أي منصة، ولا يضمن تنزيل كل رابط اجتماعي.
 
 ### 6. المركز الإسلامي
 

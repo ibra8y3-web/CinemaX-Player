@@ -29,18 +29,63 @@ object RealMediaDownloader {
 
     fun normalizeUrl(urlStr: String): String {
         var trimmed = urlStr.trim()
-        if (trimmed.startsWith("\"") && trimmed.endsWith("\"") && trimmed.length >= 2) {
-            trimmed = trimmed.substring(1, trimmed.length - 1).trim()
-        }
-        if (trimmed.startsWith("'") && trimmed.endsWith("'") && trimmed.length >= 2) {
-            trimmed = trimmed.substring(1, trimmed.length - 1).trim()
-        }
-        if (trimmed.isNotBlank() && !trimmed.startsWith("http://", ignoreCase = true) && !trimmed.startsWith("https://", ignoreCase = true)) {
-            if (trimmed.startsWith("www.") || trimmed.contains(".") || trimmed.contains("/")) {
+            .removeSurrounding("\"")
+            .removeSurrounding("'")
+            .trim()
+
+        if (trimmed.startsWith("//")) return "https:$trimmed"
+
+        // Only add HTTPS to a host-like value. Never rewrite intent://, fb://,
+        // javascript:, file:, or arbitrary paths into malformed HTTPS URLs.
+        val hasExplicitScheme = Regex("^[A-Za-z][A-Za-z0-9+.-]*:").containsMatchIn(trimmed)
+        if (!hasExplicitScheme) {
+            val hostCandidate = trimmed.substringBefore('/').substringBefore('?').substringBefore('#')
+            if (hostCandidate.startsWith("www.", ignoreCase = true) ||
+                (hostCandidate.contains('.') && !hostCandidate.startsWith('.'))) {
                 trimmed = "https://$trimmed"
             }
         }
         return trimmed
+    }
+
+    private fun socialPlatformLabel(url: String): String? {
+        val host = Uri.parse(url).host?.lowercase(Locale.ROOT) ?: return null
+        fun matches(domain: String) = host == domain || host.endsWith(".$domain")
+        return when {
+            matches("facebook.com") || matches("fb.watch") || matches("fb.com") -> "Facebook"
+            matches("instagram.com") -> "Instagram"
+            matches("tiktok.com") -> "TikTok"
+            matches("youtube.com") || matches("youtu.be") -> "YouTube"
+            matches("x.com") || matches("twitter.com") -> "X / Twitter"
+            else -> null
+        }
+    }
+
+    private fun hasVideoFileExtension(url: String): Boolean {
+        val path = Uri.parse(url).path?.lowercase(Locale.ROOT).orEmpty()
+        val extension = path.substringAfterLast('.', "")
+        return extension in setOf("mp4", "m4v", "webm", "mov", "mkv", "3gp", "avi", "flv", "m3u8", "mpd")
+    }
+
+    private fun applyRequestHeaders(
+        connection: HttpURLConnection,
+        headers: Map<String, String>,
+        originalUrl: String
+    ) {
+        val originalHost = runCatching { URL(originalUrl).host }.getOrNull()
+        val targetHost = runCatching { connection.url.host }.getOrNull()
+        val allowed = setOf("user-agent", "referer", "origin", "cookie", "accept", "accept-language")
+        val userAgent = headers.entries.firstOrNull { it.key.equals("User-Agent", true) }?.value
+        connection.setRequestProperty("User-Agent", userAgent?.takeIf { it.isNotBlank() } ?: USER_AGENT_CHROME)
+        headers.forEach { (name, value) ->
+            val key = name.lowercase(Locale.ROOT)
+            if (name.isNotBlank() && value.isNotBlank() && key in allowed) {
+                // A cookie captured for one CDN host must never be forwarded to another host.
+                if (key != "cookie" || (!originalHost.isNullOrBlank() && originalHost.equals(targetHost, true))) {
+                    connection.setRequestProperty(name, value)
+                }
+            }
+        }
     }
 
     sealed class VideoVerificationResult {
@@ -93,303 +138,169 @@ object RealMediaDownloader {
     }
 
     /**
-     * Extracts direct playable/downloadable video stream URLs from social media pages
-     * (Facebook Reels/Watch, TikTok, YouTube, Instagram, X/Twitter).
-     */
-    private fun extractSocialMediaVideo(urlStr: String): Pair<String, String>? {
-        val lower = urlStr.lowercase(Locale.ROOT)
-        val isFacebook = lower.contains("facebook.com") || lower.contains("fb.watch") || lower.contains("fb.com")
-        val isTikTok = lower.contains("tiktok.com")
-        val isYouTube = lower.contains("youtube.com") || lower.contains("youtu.be")
-        val isInstagram = lower.contains("instagram.com")
-        val isTwitter = lower.contains("twitter.com") || lower.contains("x.com")
-
-        if (!isFacebook && !isTikTok && !isYouTube && !isInstagram && !isTwitter) {
-            return null
-        }
-
-        if (isYouTube) {
-            val videoId = when {
-                urlStr.contains("youtu.be/") -> urlStr.substringAfter("youtu.be/").substringBefore("?").substringBefore("&")
-                urlStr.contains("watch?v=") -> urlStr.substringAfter("watch?v=").substringBefore("&")
-                urlStr.contains("/shorts/") -> urlStr.substringAfter("/shorts/").substringBefore("?").substringBefore("&")
-                else -> null
-            }
-            if (!videoId.isNullOrBlank()) {
-                return Pair(urlStr, "YouTube Video ($videoId)")
-            }
-        }
-
-        try {
-            var currentUrl = urlStr
-            var redirects = 0
-            var html = ""
-
-            while (redirects < 5) {
-                val conn = (URL(currentUrl).openConnection() as HttpURLConnection).apply {
-                    requestMethod = "GET"
-                    instanceFollowRedirects = false
-                    connectTimeout = 7000
-                    readTimeout = 7000
-                    setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
-                    setRequestProperty("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-                    setRequestProperty("Accept-Language", "ar,en-US;q=0.9,en;q=0.8")
-                }
-
-                val code = conn.responseCode
-                if (code in listOf(301, 302, 303, 307, 308)) {
-                    val location = conn.getHeaderField("Location")
-                    conn.disconnect()
-                    if (!location.isNullOrBlank()) {
-                        currentUrl = if (location.startsWith("http")) location else URL(URL(currentUrl), location).toString()
-                        redirects++
-                        continue
-                    }
-                }
-
-                if (code == 200) {
-                    val reader = BufferedReader(InputStreamReader(conn.inputStream, "UTF-8"))
-                    val sb = StringBuilder()
-                    var bytesRead = 0
-                    while (true) {
-                        val currentLine: String = reader.readLine() ?: break
-                        sb.append(currentLine)
-                        bytesRead += currentLine.length
-                        if (bytesRead > 600_000) break // Read up to ~600KB of page
-                    }
-                    reader.close()
-                    html = sb.toString()
-                }
-                conn.disconnect()
-                break
-            }
-
-            if (html.isNotBlank()) {
-                // 1. Check Facebook JSON properties
-                val fbPatterns = listOf(
-                    Regex("\"browser_native_hd_url\":\"(https:[^\"]+)\""),
-                    Regex("\"browser_native_sd_url\":\"(https:[^\"]+)\""),
-                    Regex("\"playable_url_quality_hd\":\"(https:[^\"]+)\""),
-                    Regex("\"playable_url\":\"(https:[^\"]+)\""),
-                    Regex("\"video_url\":\"(https:[^\"]+)\""),
-                    Regex("<meta\\s+property=\"og:video\"\\s+content=\"(https:[^\"]+)\""),
-                    Regex("<meta\\s+property=\"og:video:url\"\\s+content=\"(https:[^\"]+)\""),
-                    Regex("<meta\\s+property=\"og:video:secure_url\"\\s+content=\"(https:[^\"]+)\"")
-                )
-
-                for (pattern in fbPatterns) {
-                    val match = pattern.find(html)
-                    if (match != null) {
-                        val raw = match.groupValues[1]
-                        val unescaped = raw.replace("\\u0026", "&")
-                            .replace("\\/", "/")
-                            .replace("&amp;", "&")
-                        if (unescaped.startsWith("https://") || unescaped.startsWith("http://")) {
-                            val platform = if (isFacebook) "فيديو فيسبوك (Facebook)" else if (isTikTok) "فيديو تيك توك (TikTok)" else "فيديو سوشيال ميديا"
-                            return Pair(unescaped, platform)
-                        }
-                    }
-                }
-
-                // 2. TikTok specific regex
-                val ttPatterns = listOf(
-                    Regex("\"playAddr\":\"(https:[^\"]+)\""),
-                    Regex("\"downloadAddr\":\"(https:[^\"]+)\""),
-                    Regex("<video[^>]*src=\"(https:[^\"]+)\"")
-                )
-                for (pattern in ttPatterns) {
-                    val match = pattern.find(html)
-                    if (match != null) {
-                        val raw = match.groupValues[1]
-                        val unescaped = raw.replace("\\u0026", "&").replace("\\/", "/").replace("&amp;", "&")
-                        return Pair(unescaped, "فيديو تيك توك (TikTok)")
-                    }
-                }
-            }
-        } catch (_: Exception) {}
-
-        // Fallback for social media: Allow direct attempt without hard failure
-        val platformLabel = when {
-            isFacebook -> "فيديو فيسبوك (Facebook)"
-            isTikTok -> "فيديو تيك توك (TikTok)"
-            isInstagram -> "فيديو انستغرام (Instagram)"
-            isTwitter -> "فيديو منصة X / Twitter"
-            else -> "فيديو ويب"
-        }
-        return Pair(urlStr, platformLabel)
-    }
-
-    /**
      * Real Pre-Download Video Verifier:
      * Connects to the URL, verifies MIME type, checks social media pages (Facebook, TikTok, YouTube),
      * extracts real video format, file size, and resumability before allowing the download.
      */
-    suspend fun verifyVideoBeforeDownload(urlStr: String): VideoVerificationResult = withContext(Dispatchers.IO) {
+    suspend fun verifyVideoBeforeDownload(
+        urlStr: String,
+        requestHeaders: Map<String, String> = emptyMap()
+    ): VideoVerificationResult = withContext(Dispatchers.IO) {
         val trimmed = normalizeUrl(urlStr)
-        if (trimmed.isBlank() || (!trimmed.startsWith("http://", ignoreCase = true) && !trimmed.startsWith("https://", ignoreCase = true))) {
-            return@withContext VideoVerificationResult.Invalid("الرابط غير صالح. يرجى كتابة أو لصق رابط صالح يبدأ بـ http:// أو https://")
+        val parsed = Uri.parse(trimmed)
+        if (trimmed.isBlank() ||
+            parsed.scheme?.lowercase(Locale.ROOT) !in setOf("http", "https") ||
+            parsed.host.isNullOrBlank()
+        ) {
+            return@withContext VideoVerificationResult.Invalid(
+                "الرابط غير صالح. استخدم رابطاً يبدأ بـ https:// أو http://"
+            )
         }
 
-        // Check if social media URL (Facebook, TikTok, YouTube, Instagram, X)
-        val socialExtracted = extractSocialMediaVideo(trimmed)
-        if (socialExtracted != null) {
-            val (directOrPageUrl, formatLabel) = socialExtracted
-            if (directOrPageUrl != trimmed) {
-                // Successfully extracted direct CDN video stream!
-                return@withContext VideoVerificationResult.Valid(
-                    directUrl = directOrPageUrl,
-                    mimeType = "video/mp4",
-                    contentLength = -1L,
-                    format = "$formatLabel (رابط مباشر مستخرج 100%)",
-                    isResumable = true,
-                    server = "CDN"
-                )
+        val platform = socialPlatformLabel(trimmed)
+        if (platform != null && !hasVideoFileExtension(trimmed)) {
+            val advice = if (platform == "YouTube") {
+                "هذا رابط صفحة YouTube وليس ملف فيديو مباشر. لا يستخرج CinemaX روابط YouTube الخاصة ولا يتجاوز DRM أو قيود المنصة. استخدم خيار التنزيل الرسمي المتاح من YouTube أو رابط ملف يتيحه مالك المحتوى."
             } else {
-                // Extraction failed: the URL is still a web page, downloading it would only save HTML.
-                val isYt = trimmed.contains("youtube.com", true) || trimmed.contains("youtu.be", true)
-                return@withContext VideoVerificationResult.SocialWebPage(
-                    pageUrl = trimmed,
-                    platform = formatLabel,
-                    advice = if (isYt)
-                        "تحميل فيديوهات يوتيوب غير مدعوم داخل التطبيق. يمكنك مشاهدته عبر يوتيوب أو استخدام خدمة YouTube Premium للتنزيل الرسمي."
-                    else
-                        "تعذر استخراج رابط الفيديو المباشر من هذه الصفحة (قد يكون الفيديو خاصاً أو محمياً). افتح الرابط في المستكشف المدمج (Web Video Sniffer) وشغّل الفيديو ليلتقطه التطبيق."
-                )
+                "هذا رابط صفحة " + platform + " وليس ملف MP4. افتح الصفحة في المستكشف، وسجّل الدخول بنفسك عند الحاجة، ثم شغّل الفيديو. سيظهر فقط ملف فيديو مباشر إذا أتاحه الموقع للمتصفح دون حماية أو DRM."
             }
+            return@withContext VideoVerificationResult.SocialWebPage(
+                pageUrl = trimmed,
+                platform = platform,
+                advice = advice
+            )
         }
 
         var currentUrl = trimmed
         var redirects = 0
         var conn: HttpURLConnection? = null
-
         try {
             while (redirects < 10) {
                 val url = URL(currentUrl)
-                conn = (url.openConnection() as HttpURLConnection).apply {
+                val active = (url.openConnection() as HttpURLConnection).apply {
                     requestMethod = "GET"
-                    // Do NOT send Range on probe to avoid 400 Bad Request on CDNs!
-                    setRequestProperty("User-Agent", USER_AGENT_CHROME)
-                    setRequestProperty("Accept", "*/*")
                     instanceFollowRedirects = false
-                    connectTimeout = 8000
-                    readTimeout = 8000
+                    connectTimeout = 10_000
+                    readTimeout = 10_000
+                    setRequestProperty("Accept", "*/*")
                 }
+                applyRequestHeaders(active, requestHeaders, trimmed)
+                conn = active
 
-                val code = conn.responseCode
-                if (code == HttpURLConnection.HTTP_MOVED_PERM || code == HttpURLConnection.HTTP_MOVED_TEMP || code == 303 || code == 307 || code == 308) {
-                    val location = conn.getHeaderField("Location")
-                    conn.disconnect()
-                    if (!location.isNullOrBlank()) {
-                        currentUrl = if (location.startsWith("http")) location else URL(url, location).toString()
-                        redirects++
-                        continue
+                val code = active.responseCode
+                if (code in listOf(301, 302, 303, 307, 308)) {
+                    val location = active.getHeaderField("Location")
+                    active.disconnect()
+                    conn = null
+                    if (location.isNullOrBlank()) {
+                        return@withContext VideoVerificationResult.Invalid("أعاد الخادم تحويلاً بلا عنوان وجهة.")
                     }
+                    currentUrl = if (location.startsWith("http", true)) {
+                        location
+                    } else {
+                        URL(url, location).toString()
+                    }
+                    redirects++
+                    continue
                 }
                 break
             }
 
-            if (conn == null) {
-                return@withContext VideoVerificationResult.Invalid("تعذر الاتصال بالخادم للتحقق من الرابط")
-            }
-
-            val responseCode = conn.responseCode
+            val active = conn ?: return@withContext VideoVerificationResult.Invalid(
+                "تعذر الاتصال بالخادم أو تجاوز الرابط عدد التحويلات المسموح."
+            )
+            val responseCode = active.responseCode
             if (responseCode !in 200..299) {
-                conn.disconnect()
-                return@withContext VideoVerificationResult.Invalid("الخادم رد برمز خطأ ($responseCode). الرابط غير متاح أو منتهي الصلاحية.")
+                val contentType = active.contentType?.substringBefore(';')?.trim().orEmpty()
+                active.disconnect()
+                conn = null
+                return@withContext VideoVerificationResult.Invalid(
+                    "الخادم رفض الطلب برمز " + responseCode + ". قد يكون الرابط منتهياً أو يحتاج جلسة دخول صالحة.",
+                    contentType.ifBlank { null }
+                )
             }
 
-            val contentType = conn.contentType?.lowercase(Locale.ROOT)?.split(";")?.first()?.trim() ?: "unknown"
-            val contentLengthHeader = conn.getHeaderField("Content-Length")?.toLongOrNull() ?: -1L
-            val contentRangeHeader = conn.getHeaderField("Content-Range")
-            val totalLength = if (contentRangeHeader != null && contentRangeHeader.contains("/")) {
+            val contentType = active.contentType?.lowercase(Locale.ROOT)?.substringBefore(';')?.trim() ?: "unknown"
+            val contentLengthHeader = active.getHeaderField("Content-Length")?.toLongOrNull() ?: -1L
+            val contentRangeHeader = active.getHeaderField("Content-Range")
+            val totalLength = if (!contentRangeHeader.isNullOrBlank() && contentRangeHeader.contains("/")) {
                 contentRangeHeader.substringAfterLast("/").trim().toLongOrNull() ?: contentLengthHeader
             } else {
                 contentLengthHeader
             }
-            val acceptRanges = conn.getHeaderField("Accept-Ranges")
-            val isResumable = (acceptRanges != null && acceptRanges.contains("bytes", ignoreCase = true)) || (responseCode == 206)
-            val server = conn.getHeaderField("Server")
-            conn.disconnect()
+            val acceptRanges = active.getHeaderField("Accept-Ranges")
+            val isResumable = (!acceptRanges.isNullOrBlank() && acceptRanges.contains("bytes", true)) ||
+                responseCode == HttpURLConnection.HTTP_PARTIAL
+            val server = active.getHeaderField("Server")
+            active.disconnect()
+            conn = null
 
-            // If HTML, check if page contains meta og:video before rejecting
             if (contentType.contains("text/html") || contentType.contains("text/plain")) {
-                val extracted = extractSocialMediaVideo(currentUrl)
-                if (extracted != null && extracted.first != currentUrl) {
-                    return@withContext VideoVerificationResult.Valid(
-                        directUrl = extracted.first,
-                        mimeType = "video/mp4",
-                        contentLength = -1L,
-                        format = "${extracted.second} (مستخرج)",
-                        isResumable = true,
-                        server = server
-                    )
-                }
-
                 return@withContext VideoVerificationResult.Invalid(
-                    reason = "الرابط يشير إلى صفحة ويب (HTML). إذا كان الفيديو داخل موقع تواصل (فيسبوك، تيك توك، يوتيوب)، تم تمكين التنزيل المباشر بالأسفل.",
-                    detectedType = contentType
+                    "الرابط يعرض صفحة ويب (HTML) وليس ملف فيديو. افتح رابط الصفحة في المستكشف أو استخدم رابط ملف مباشر.",
+                    contentType
+                )
+            }
+            if (contentType.contains("application/json") ||
+                (contentType.contains("application/xml") && !contentType.contains("dash+xml"))
+            ) {
+                return@withContext VideoVerificationResult.Invalid(
+                    "الرابط يعرض بيانات API/JSON وليس ملف فيديو.",
+                    contentType
                 )
             }
 
-            if (contentType.contains("application/json") || contentType.contains("application/xml") && !contentType.contains("dash+xml")) {
+            val lowerUrl = currentUrl.lowercase(Locale.ROOT)
+            val isHls = contentType.contains("mpegurl") || lowerUrl.substringBefore('?').endsWith(".m3u8")
+            val isDash = contentType.contains("dash+xml") || lowerUrl.substringBefore('?').endsWith(".mpd")
+            val knownDirectExtension = hasVideoFileExtension(currentUrl)
+            val knownVideoMime = contentType.startsWith("video/") ||
+                contentType.contains("mp4") || contentType.contains("webm") ||
+                contentType.contains("quicktime") || contentType.contains("matroska")
+            val knownMediaCdn = listOf("fbcdn.net", "cdninstagram.com", "tiktokcdn.com", "twimg.com")
+                .any { host -> (Uri.parse(currentUrl).host ?: "").lowercase(Locale.ROOT).endsWith(host) }
+            val opaqueMedia = contentType == "application/octet-stream" && (knownDirectExtension || knownMediaCdn)
+
+            if (!isHls && !isDash && !knownVideoMime && !knownDirectExtension && !opaqueMedia) {
                 return@withContext VideoVerificationResult.Invalid(
-                    reason = "الرابط يشير إلى واجهة بيانات برمجية (API/JSON) وليس ملف فيديو حقيقي.",
-                    detectedType = contentType
+                    "نوع المحتوى المكتشف (" + contentType + ") ليس ملف فيديو واضحاً.",
+                    contentType
                 )
             }
 
-            // Check if recognized video or media format
-            val isVideoMime = contentType.startsWith("video/") ||
-                    contentType.contains("mpegurl") ||
-                    contentType.contains("dash+xml") ||
-                    contentType.contains("mp4") ||
-                    contentType.contains("ogg")
-
-            val urlLower = currentUrl.lowercase(Locale.ROOT)
-            val hasVideoExt = urlLower.contains(".mp4") || urlLower.contains(".mkv") || urlLower.contains(".webm") ||
-                    urlLower.contains(".m3u8") || urlLower.contains(".mov") || urlLower.contains(".ts") ||
-                    urlLower.contains(".avi") || urlLower.contains(".flv") || urlLower.contains(".3gp")
-
-            if (!isVideoMime && !hasVideoExt && !contentType.contains("application/octet-stream")) {
-                return@withContext VideoVerificationResult.Invalid(
-                    reason = "نوع الملف المكتشف ($contentType) ليس فيديو قابل للتشغيل. يرجى توفير رابط فيديو حقيقي.",
-                    detectedType = contentType
-                )
-            }
-
-            val detectedFormat = when {
-                contentType.contains("mp4") || urlLower.contains(".mp4") -> "MP4 (H.264 / AAC)"
-                contentType.contains("webm") || urlLower.contains(".webm") -> "WebM (VP9 / Opus)"
-                contentType.contains("matroska") || urlLower.contains(".mkv") -> "MKV (Matroska)"
-                contentType.contains("mpegurl") || urlLower.contains(".m3u8") -> "HLS Live Stream (M3U8)"
-                contentType.contains("dash") || urlLower.contains(".mpd") -> "MPEG-DASH Stream"
-                contentType.contains("quicktime") || urlLower.contains(".mov") -> "MOV (QuickTime)"
-                contentType.contains("mp2t") || urlLower.contains(".ts") -> "MPEG-2 Transport Stream"
-                else -> "فيديو متوافق ($contentType)"
+            val format = when {
+                isHls -> "قائمة HLS (M3U8) — تحتاج مدير تنزيلات بث مخصص"
+                isDash -> "قائمة MPEG-DASH (MPD) — تحتاج مدير تنزيلات بث مخصص"
+                contentType.contains("webm") || lowerUrl.contains(".webm") -> "WebM"
+                contentType.contains("matroska") || lowerUrl.contains(".mkv") -> "MKV"
+                contentType.contains("quicktime") || lowerUrl.contains(".mov") -> "MOV"
+                contentType.contains("mp4") || lowerUrl.contains(".mp4") -> "MP4"
+                else -> "ملف فيديو مباشر (" + contentType + ")"
             }
 
             VideoVerificationResult.Valid(
                 directUrl = currentUrl,
-                mimeType = if (contentType != "unknown" && contentType != "application/octet-stream") contentType else "video/mp4",
+                mimeType = if (contentType != "unknown") contentType else "video/mp4",
                 contentLength = totalLength,
-                format = detectedFormat,
+                format = format,
                 isResumable = isResumable,
                 server = server
             )
         } catch (e: Exception) {
-            // If connection failed, but it looks like a social media or direct video URL, permit direct download attempt
-            val lower = trimmed.lowercase(Locale.ROOT)
-            if (lower.contains("facebook.com") || lower.contains("fb.watch") || lower.contains("tiktok.com") || lower.contains("youtube.com") || lower.contains(".mp4")) {
+            conn?.disconnect()
+            if (hasVideoFileExtension(trimmed) && !trimmed.substringBefore('?').lowercase(Locale.ROOT).endsWith(".m3u8")) {
                 VideoVerificationResult.Valid(
                     directUrl = trimmed,
                     mimeType = "video/mp4",
                     contentLength = -1L,
-                    format = "فيديو مباشر (تنزيل ذكي)",
-                    isResumable = true,
-                    server = "Direct Stream"
+                    format = "رابط ملف فيديو مباشر — تعذر قراءة بيانات الخادم",
+                    isResumable = false,
+                    server = null
                 )
             } else {
-                VideoVerificationResult.Invalid("تعذر الاتصال بالرابط وفحصه: ${e.message ?: "خطأ في الشبكة"}")
+                VideoVerificationResult.Invalid(
+                    "تعذر التحقق من الرابط: " + (e.localizedMessage ?: "خطأ في الاتصال")
+                )
             }
         }
     }
@@ -397,43 +308,42 @@ object RealMediaDownloader {
     /**
      * Resolves direct media URL, follows redirects, detects real content type and filename.
      */
-    suspend fun resolveMediaDetails(urlStr: String): Pair<String, String> = withContext(Dispatchers.IO) {
+    suspend fun resolveMediaDetails(
+        urlStr: String,
+        requestHeaders: Map<String, String> = emptyMap()
+    ): Pair<String, String> = withContext(Dispatchers.IO) {
         var currentUrl = normalizeUrl(urlStr)
         var redirects = 0
         var finalUrl = currentUrl
         var mimeType = "video/mp4"
 
         while (redirects < 10) {
+            val url = URL(currentUrl)
+            val conn = (url.openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                instanceFollowRedirects = false
+                connectTimeout = 10_000
+                readTimeout = 10_000
+                setRequestProperty("Accept", "*/*")
+            }
+            applyRequestHeaders(conn, requestHeaders, normalizeUrl(urlStr))
             try {
-                val url = URL(currentUrl)
-                val conn = (url.openConnection() as HttpURLConnection).apply {
-                    requestMethod = "GET"
-                    instanceFollowRedirects = false
-                    connectTimeout = 7000
-                    readTimeout = 7000
-                    setRequestProperty("User-Agent", USER_AGENT_CHROME)
-                    setRequestProperty("Accept", "*/*")
-                }
-
                 val code = conn.responseCode
-                if (code == HttpURLConnection.HTTP_MOVED_PERM || code == HttpURLConnection.HTTP_MOVED_TEMP || code == 303 || code == 307 || code == 308) {
+                if (code in listOf(301, 302, 303, 307, 308)) {
                     val location = conn.getHeaderField("Location")
                     conn.disconnect()
                     if (!location.isNullOrBlank()) {
-                        currentUrl = if (location.startsWith("http")) location else URL(url, location).toString()
+                        currentUrl = if (location.startsWith("http", true)) location else URL(url, location).toString()
                         redirects++
                         continue
                     }
                 }
-
                 finalUrl = currentUrl
-                val contentType = conn.contentType
-                if (!contentType.isNullOrBlank()) {
-                    mimeType = contentType.split(";").first().trim()
-                }
+                conn.contentType?.let { mimeType = it.substringBefore(';').trim() }
                 conn.disconnect()
                 break
             } catch (_: Exception) {
+                conn.disconnect()
                 break
             }
         }
@@ -443,7 +353,12 @@ object RealMediaDownloader {
     /**
      * Enqueues download using Android System DownloadManager.
      */
-    fun downloadWithSystemManager(context: Context, urlStr: String, customFileName: String? = null): Long {
+    fun downloadWithSystemManager(
+        context: Context,
+        urlStr: String,
+        customFileName: String? = null,
+        requestHeaders: Map<String, String> = emptyMap()
+    ): Long {
         val cleanUrl = normalizeUrl(urlStr)
         val uri = Uri.parse(cleanUrl)
 
@@ -455,8 +370,15 @@ object RealMediaDownloader {
             setDescription("جاري تنزيل الفيديوهات والوسائط إلى المجلد العام Downloads...")
             setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
             setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
-            addRequestHeader("User-Agent", USER_AGENT_CHROME)
-            addRequestHeader("Accept", "*/*")
+            addRequestHeader("User-Agent", requestHeaders.entries.firstOrNull { it.key.equals("User-Agent", true) }?.value ?: USER_AGENT_CHROME)
+            addRequestHeader("Accept", requestHeaders.entries.firstOrNull { it.key.equals("Accept", true) }?.value ?: "*/*")
+            requestHeaders.forEach { (name, value) ->
+                if (name.isNotBlank() && value.isNotBlank() &&
+                    name.lowercase(Locale.ROOT) in setOf("referer", "origin", "cookie", "accept-language")
+                ) {
+                    addRequestHeader(name, value)
+                }
+            }
             setAllowedOverRoaming(true)
             setAllowedOverMetered(true)
         }
@@ -471,12 +393,13 @@ object RealMediaDownloader {
     suspend fun downloadWithHttpEngine(
         context: Context,
         urlStr: String,
+        requestHeaders: Map<String, String> = emptyMap(),
         onProgress: (DownloadProgress) -> Unit
     ) = withContext(Dispatchers.IO) {
         resetPause()
         try {
             val normalizedUrl = normalizeUrl(urlStr)
-            val (resolvedUrl, mimeType) = resolveMediaDetails(normalizedUrl)
+            val (resolvedUrl, mimeType) = resolveMediaDetails(normalizedUrl, requestHeaders)
             val url = URL(resolvedUrl)
 
             // Temp file for Range Request Resume support
@@ -498,6 +421,7 @@ object RealMediaDownloader {
                         setRequestProperty("Accept", "*/*")
                         setRequestProperty("Range", "bytes=$existingBytes-")
                     }
+                    applyRequestHeaders(conn, requestHeaders, normalizedUrl)
                     responseCode = conn.responseCode
                 } catch (_: Exception) {}
             }
@@ -515,6 +439,7 @@ object RealMediaDownloader {
                     setRequestProperty("User-Agent", USER_AGENT_CHROME)
                     setRequestProperty("Accept", "*/*")
                 }
+                applyRequestHeaders(conn, requestHeaders, normalizedUrl)
                 responseCode = conn.responseCode
             }
 
@@ -526,7 +451,7 @@ object RealMediaDownloader {
                 val errorMsg = if (responseCode == 400) {
                     "خطأ من السيرفر (كود 400): هذا الرابط يحتاج استخراج مباشر. استخدم المستكشف المدمج (Web Video Sniffer) لالتقاطه فوراً!"
                 } else if (responseCode == 403) {
-                    "خطأ 403 (وصول مقيد): الرابط محمي بجلسة. استخدم المستكشف المدمج لالتقاط الفيديو أثناء تشغيله."
+                    "خطأ 403 (وصول مقيد): انتهت صلاحية الرابط أو أن الخادم لم يقبل جلسة المتصفح. أعد فتح الصفحة والتقاط الرابط من جديد."
                 } else {
                     "خطأ من السيرفر (كود $responseCode)"
                 }
@@ -541,7 +466,7 @@ object RealMediaDownloader {
             if (detectedContentType.contains("text/html") && !resolvedUrl.contains(".m3u8")) {
                 activeConn.disconnect()
                 try { tempFile.delete() } catch (_: Exception) {}
-                onProgress(DownloadProgress(0, 0, 0, errorMsg = "الرابط يقود إلى صفحة ويب وليس ملف فيديو مباشر. استخدم المستكشف المدمج لالتقاط الفيديو فوراً!"))
+                onProgress(DownloadProgress(0, 0, 0, errorMsg = "الرابط يقود إلى صفحة ويب وليس ملف فيديو مباشر. افتح الصفحة في المستكشف وشغّل ملفاً مباشراً متاحاً للتنزيل."))
                 return@withContext
             }
 
