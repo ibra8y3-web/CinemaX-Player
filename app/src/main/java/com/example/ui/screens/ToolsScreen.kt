@@ -1603,7 +1603,36 @@ fun ToolsScreen(
                                 } else if (urlToDownload.isNotBlank()) {
                                     scope.launch {
                                         try {
-                                        // 1. Enforce Verification
+                                        // Route website links directly to the universal extractor.
+                                        // Users paste the original page URL; the app does not require
+                                        // them to discover a separate MP4 URL or inspect the page first.
+                                        val linkRoute = DownloadLinkAnalyzer.analyze(urlToDownload).route
+                                        val useWebsiteExtractor = downloadExpectedMimeType.isNullOrBlank() &&
+                                            linkRoute in setOf(
+                                                DownloadLinkAnalyzer.Route.SOCIAL_PAGE,
+                                                DownloadLinkAnalyzer.Route.WEB_PAGE,
+                                                DownloadLinkAnalyzer.Route.HLS_MANIFEST,
+                                                DownloadLinkAnalyzer.Route.DASH_MANIFEST
+                                            )
+                                        if (useWebsiteExtractor) {
+                                            isVerifyingUrl = false
+                                            verificationResult = null
+                                            universalInfo = null
+                                            universalInfoUrl = ""
+                                            selectedUniversalFormat = null
+                                            Toast.makeText(
+                                                context,
+                                                "تم اكتشاف رابط صفحة — جاري استخراج الفيديو وتنزيل أفضل جودة متاحة تلقائياً...",
+                                                Toast.LENGTH_LONG
+                                            ).show()
+                                            downloadWithUniversalEngine(
+                                                urls = listOf(urlToDownload),
+                                                requestHeaders = downloadRequestHeaders
+                                            )
+                                            return@launch
+                                        }
+
+                                        // Direct files and captured CDN media use the direct downloader.
                                         var currentVerification = verificationResult
                                         if (currentVerification == null) {
                                             isVerifyingUrl = true
