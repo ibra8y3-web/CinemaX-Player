@@ -268,9 +268,17 @@ object RealMediaDownloader {
                 )
             }
 
+            if (isHls || isDash) {
+                return@withContext VideoVerificationResult.Invalid(
+                    if (isHls)
+                        "هذا رابط قائمة HLS (M3U8)، وليس ملف فيديو منفرداً. تنزيل قوائم البث وتجميع مقاطعها غير متاح في هذا الإصدار."
+                    else
+                        "هذا رابط قائمة MPEG-DASH (MPD)، وليس ملف فيديو منفرداً. تنزيل قوائم البث وتجميع مقاطعها غير متاح في هذا الإصدار.",
+                    contentType
+                )
+            }
+
             val format = when {
-                isHls -> "قائمة HLS (M3U8) — تحتاج مدير تنزيلات بث مخصص"
-                isDash -> "قائمة MPEG-DASH (MPD) — تحتاج مدير تنزيلات بث مخصص"
                 contentType.contains("webm") || lowerUrl.contains(".webm") -> "WebM"
                 contentType.contains("matroska") || lowerUrl.contains(".mkv") -> "MKV"
                 contentType.contains("quicktime") || lowerUrl.contains(".mov") -> "MOV"
@@ -288,7 +296,11 @@ object RealMediaDownloader {
             )
         } catch (e: Exception) {
             conn?.disconnect()
-            if (hasVideoFileExtension(trimmed) && !trimmed.substringBefore('?').lowercase(Locale.ROOT).endsWith(".m3u8")) {
+            val trimmedPath = Uri.parse(trimmed).path?.lowercase(Locale.ROOT).orEmpty()
+            if (hasVideoFileExtension(trimmed) &&
+                !trimmedPath.endsWith(".m3u8") &&
+                !trimmedPath.endsWith(".mpd")
+            ) {
                 VideoVerificationResult.Valid(
                     directUrl = trimmed,
                     mimeType = "video/mp4",

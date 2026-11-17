@@ -1216,8 +1216,16 @@ fun ToolsScreen(
                                         val directUrl = (currentVerification as? com.example.media.RealMediaDownloader.VideoVerificationResult.Valid)?.directUrl ?: urlToDownload
 
                                         if (currentVerification is com.example.media.RealMediaDownloader.VideoVerificationResult.Invalid) {
-                                            Toast.makeText(context, "جاري محاولة التحميل المباشر للرابط...", Toast.LENGTH_SHORT).show()
+                                            Toast.makeText(context, currentVerification.reason, Toast.LENGTH_LONG).show()
+                                            return@launch
                                         }
+
+                                        val verified = currentVerification as? com.example.media.RealMediaDownloader.VideoVerificationResult.Valid
+                                        if (verified == null) {
+                                            Toast.makeText(context, "تعذر تأكيد ملف الفيديو. لم يبدأ التنزيل.", Toast.LENGTH_LONG).show()
+                                            return@launch
+                                        }
+                                        val verifiedDirectUrl = verified.directUrl
 
                                         isDownloading = true
                                         isDownloadPaused = false
@@ -1228,7 +1236,7 @@ fun ToolsScreen(
 
                                         com.example.media.RealMediaDownloader.downloadWithHttpEngine(
                                             context = context,
-                                            urlStr = directUrl,
+                                            urlStr = verifiedDirectUrl,
                                             requestHeaders = downloadRequestHeaders
                                         ) { progress ->
                                             scope.launch(Dispatchers.Main) {
@@ -1295,10 +1303,18 @@ fun ToolsScreen(
                                             return@launch
                                         }
 
-                                        val directUrl = (currentVerification as? com.example.media.RealMediaDownloader.VideoVerificationResult.Valid)?.directUrl ?: urlToDownload
+                                        if (currentVerification is com.example.media.RealMediaDownloader.VideoVerificationResult.Invalid) {
+                                            Toast.makeText(context, currentVerification.reason, Toast.LENGTH_LONG).show()
+                                            return@launch
+                                        }
+                                        val verified = currentVerification as? com.example.media.RealMediaDownloader.VideoVerificationResult.Valid
+                                        if (verified == null) {
+                                            Toast.makeText(context, "تعذر تأكيد ملف الفيديو. لم يبدأ التنزيل.", Toast.LENGTH_LONG).show()
+                                            return@launch
+                                        }
 
                                         try {
-                                            com.example.media.RealMediaDownloader.downloadWithSystemManager(context, directUrl, requestHeaders = downloadRequestHeaders)
+                                            com.example.media.RealMediaDownloader.downloadWithSystemManager(context, verified.directUrl, requestHeaders = downloadRequestHeaders)
                                             showDownloadDialog = false
                                             downloadUrl = ""
                                             verificationResult = null
