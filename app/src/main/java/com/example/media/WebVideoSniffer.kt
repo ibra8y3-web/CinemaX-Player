@@ -88,8 +88,8 @@ data class CapturedVideoSource(
 ) {
     val confidenceScore: Int
         get() = when (sourceKind) {
-            "active-video" -> if (isPlaying) 120 else 100
-            "video-source" -> 80
+            "active-video", "active-audio" -> if (isPlaying) 120 else 100
+            "video-source", "audio-source" -> 80
             else -> 10
         } + if (width > 0 && height > 0) 10 else 0
 }
@@ -110,8 +110,12 @@ object WebVideoSnifferHelper {
         val extension = path.substringAfterLast('.', "")
         if (extension in setOf("m3u8", "mpd")) return false
         val responseMime = mimeType?.substringBefore(';')?.trim()?.lowercase().orEmpty()
-        if (responseMime.startsWith("video/")) return true
-        if (extension in setOf("mp4", "m4v", "webm", "mov", "mkv", "3gp", "avi", "flv")) {
+        if (responseMime.startsWith("video/") || responseMime.startsWith("audio/")) return true
+        if (extension in setOf(
+                "mp4", "m4v", "webm", "mov", "mkv", "3gp", "avi", "flv",
+                "mp3", "m4a", "aac", "wav", "flac", "ogg", "opus", "wma", "aiff"
+            )
+        ) {
             return true
         }
         if (query.contains("mime_type=video_mp4") || query.contains("content_type=video")) {
@@ -148,7 +152,7 @@ fun WebVideoSnifferDialog(
         if (normalized.startsWith("https://", true) || normalized.startsWith("http://", true)) {
             normalized
         } else {
-            "https://www.facebook.com"
+            "about:blank"
         }
     }
 
@@ -156,8 +160,8 @@ fun WebVideoSnifferDialog(
     var selectedSourceUrl by remember { mutableStateOf<String?>(null) }
     var isLoadingPage by remember { mutableStateOf(true) }
     var browserError by remember { mutableStateOf<String?>(null) }
-    var currentPageUrl by remember { mutableStateOf(safeInitialUrl) }
-    var addressInput by remember { mutableStateOf(safeInitialUrl) }
+    var currentPageUrl by remember { mutableStateOf(safeInitialUrl.takeIf { it != "about:blank" }.orEmpty()) }
+    var addressInput by remember { mutableStateOf(safeInitialUrl.takeIf { it != "about:blank" }.orEmpty()) }
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     // shouldInterceptRequest runs off the UI thread. These snapshots keep it
     // from reading Compose state or WebView settings on that background thread.
@@ -238,7 +242,10 @@ fun WebVideoSnifferDialog(
 
     fun openCurrentPageExternally() {
         val target = currentPageUrl
-        if (!target.startsWith("http://", true) && !target.startsWith("https://", true)) return
+        if (!target.startsWith("http://", true) && !target.startsWith("https://", true)) {
+            browserError = "أدخل رابط صفحة أولاً ثم افتحها في المتصفح الخارجي."
+            return
+        }
         runCatching {
             context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(target)))
         }.onFailure {
@@ -350,7 +357,7 @@ fun WebVideoSnifferDialog(
                         )
                     } else {
                         Text(
-                            if (capturedSources.isEmpty()) "شغّل الفيديو ثم اضغط فحص" else "تم العثور على " + capturedSources.size + " رابط",
+                            if (capturedSources.isEmpty()) "شغّل الفيديو أو الصوت ثم اضغط فحص" else "تم العثور على " + capturedSources.size + " مصدر وسائط",
                             color = Color(0xFF22E3FF),
                             fontSize = 10.sp
                         )
@@ -398,7 +405,10 @@ fun WebVideoSnifferDialog(
                                         Spacer(modifier = Modifier.width(7.dp))
                                         Text(
                                             when {
+                                                source.isPlaying && source.mimeType?.startsWith("audio/") == true -> "الصوت الذي يعمل الآن"
                                                 source.isPlaying -> "الفيديو الذي يعمل الآن"
+                                                source.sourceKind == "active-audio" -> "مشغل صوت في الصفحة"
+                                                source.sourceKind == "audio-source" -> "مصدر صوت في الصفحة"
                                                 source.sourceKind == "active-video" -> "عنصر فيديو في الصفحة"
                                                 source.sourceKind == "video-source" -> "مصدر فيديو في الصفحة"
                                                 else -> "طلب شبكة مرشح — تحقق قبل التنزيل"
@@ -477,8 +487,8 @@ fun WebVideoSnifferDialog(
                                     ): Boolean {
                                         val scheme = request.url.scheme?.lowercase().orEmpty()
                                         if (scheme == "http" || scheme == "https") return false
-                                        // Ignore app deep-links (for example fb://) without
-                                        // covering the web preview with a false page-load error.
+                                        // A social page may hand off to its official app.
+                                        browserError = "الموقع طلب فتح تطبيق خارجي. إذا لم يظهر المحتوى هنا، استخدم فتح الصفحة في المتصفح."
                                         return true
                                     }
 
@@ -657,8 +667,15 @@ fun WebVideoSnifferDialog(
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("إغلاق", color = Color(0xFFA9B4D6))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = onDismiss) {
+                    Text("إغلاق", color = Color(0xFFA9B4D6))
+                }
+                if (currentPageUrl.startsWith("http://", true) || currentPageUrl.startsWith("https://", true)) {
+                    TextButton(onClick = { openCurrentPageExternally() }) {
+                        Text("فتح الصفحة في المتصفح الخارجي", color = Color(0xFF22E3FF))
+                    }
+                }
             }
         }
     )
@@ -699,15 +716,19 @@ private fun scanWebViewForVideoSources(
                     isPlaying: playing
                 });
             }
-            document.querySelectorAll('video').forEach(function(video) {
+            document.querySelectorAll('video, audio').forEach(function(video) {
+                var isAudio = video.tagName.toLowerCase() === 'audio';
+                var fallbackMime = isAudio ? 'audio/*' : 'video/*';
+                var activeKind = isAudio ? 'active-audio' : 'active-video';
+                var sourceKind = isAudio ? 'audio-source' : 'video-source';
                 var activeUrl = video.currentSrc || '';
-                if (activeUrl) pushMedia(activeUrl, video.getAttribute('type') || 'video/*', 'active-video', video);
+                if (activeUrl) pushMedia(activeUrl, video.getAttribute('type') || fallbackMime, activeKind, video);
                 if (video.src && video.src !== activeUrl) {
-                    pushMedia(video.src, video.getAttribute('type') || 'video/*', 'video-source', video);
+                    pushMedia(video.src, video.getAttribute('type') || fallbackMime, sourceKind, video);
                 }
                 video.querySelectorAll('source').forEach(function(source) {
                     if (source.src && source.src !== activeUrl && source.src !== video.src) {
-                        pushMedia(source.src, source.type || 'video/*', 'video-source', video);
+                        pushMedia(source.src, source.type || fallbackMime, sourceKind, video);
                     }
                 });
             });

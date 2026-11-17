@@ -961,9 +961,9 @@ fun ToolsScreen(
                                 downloadExpectedMimeType = null
                                 verificationResult = null
                             },
-                            placeholder = { Text("رابط فيديو أو PDF أو ZIP أو أي ملف مدعوم", color = Color(0xFF8B96BD), fontSize = 11.sp) },
-                            minLines = 1,
-                            maxLines = 2,
+                            placeholder = { Text("الصق رابط ملف مباشر أو عدة روابط، كل رابط في سطر", color = Color(0xFF8B96BD), fontSize = 11.sp) },
+                            minLines = 2,
+                            maxLines = 5,
                             enabled = !isDownloading && !isDownloadPaused,
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedTextColor = Color.White,
@@ -1004,6 +1004,13 @@ fun ToolsScreen(
                         }
                     }
 
+                    Text(
+                        "يدعم روابط الملفات المباشرة للفيديو والصوت وAPK وXAPK وZIP والمستندات. لتنزيل عدة ملفات الصق كل رابط في سطر ثم اختر الإضافة للخلفية.",
+                        color = Color(0xFF9EABD0),
+                        fontSize = 9.sp,
+                        modifier = Modifier.padding(top = 5.dp, bottom = 4.dp)
+                    )
+
                     // Verification Check Button & Status
                     if (downloadUrl.isNotBlank() && !isDownloading && !isDownloadPaused) {
                         Spacer(modifier = Modifier.height(10.dp))
@@ -1015,16 +1022,31 @@ fun ToolsScreen(
                             Text("تحليل الرابط والتحقق من الملف:", color = Color(0xFFA9B4D6), fontSize = 11.sp)
                             OutlinedButton(
                                 onClick = {
-                                    isVerifyingUrl = true
-                                    verificationResult = null
-                                    scope.launch {
-                                        val result = com.example.media.RealMediaDownloader.verifyVideoBeforeDownload(
-                                            downloadUrl,
-                                            downloadRequestHeaders,
-                                            downloadExpectedMimeType
-                                        )
-                                        verificationResult = result
-                                        isVerifyingUrl = false
+                                    val links = DownloadLinkAnalyzer.extractUrls(downloadUrl)
+                                    when {
+                                        links.size > 1 -> Toast.makeText(
+                                            context,
+                                            "تم إدخال ${links.size} روابط. استخدم زر الإضافة للخلفية لفحصها وإضافتها دفعة واحدة.",
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                        links.size == 1 -> {
+                                            isVerifyingUrl = true
+                                            verificationResult = null
+                                            scope.launch {
+                                                try {
+                                                    verificationResult = com.example.media.RealMediaDownloader.verifyVideoBeforeDownload(
+                                                        links.first(),
+                                                        downloadRequestHeaders,
+                                                        downloadExpectedMimeType
+                                                    )
+                                                } catch (error: Exception) {
+                                                    Toast.makeText(context, error.localizedMessage ?: "تعذر فحص الرابط", Toast.LENGTH_LONG).show()
+                                                } finally {
+                                                    isVerifyingUrl = false
+                                                }
+                                            }
+                                        }
+                                        else -> Toast.makeText(context, "أدخل رابط HTTP أو HTTPS صالحاً أولاً.", Toast.LENGTH_SHORT).show()
                                     }
                                 },
                                 enabled = !isVerifyingUrl,
@@ -1085,10 +1107,48 @@ fun ToolsScreen(
                                         Spacer(modifier = Modifier.height(4.dp))
                                         Text(res.advice, color = Color(0xFFE6EAFA), fontSize = 11.sp)
                                         Text(
-                                            "صفحة ويب وليست ملفاً مباشراً. استخدم مستكشف الفيديو من الإعدادات عند الحاجة.",
+                                            if (res.platform.equals("YouTube", ignoreCase = true)) {
+                                                "رابط YouTube لا يتحول إلى ملف تنزيل مباشر داخل CinemaX. افتح الفيديو في YouTube واستخدم خياراته الرسمية المتاحة."
+                                            } else {
+                                                "هذا رابط صفحة وليس ملفاً مباشراً. افتح الصفحة في المستكشف، شغّل الوسائط، ثم اختر المصدر المباشر إذا أتاحه الموقع."
+                                            },
                                             color = Color(0xFFB8C5EB),
                                             fontSize = 10.sp
                                         )
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            Button(
+                                                onClick = {
+                                                    if (res.platform.equals("YouTube", ignoreCase = true)) {
+                                                        runCatching {
+                                                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(res.pageUrl)))
+                                                        }.onFailure {
+                                                            Toast.makeText(context, "تعذر فتح YouTube على هذا الجهاز.", Toast.LENGTH_LONG).show()
+                                                        }
+                                                    } else {
+                                                        downloadUrl = res.pageUrl
+                                                        showDownloadDialog = false
+                                                        showSnifferDialog = true
+                                                    }
+                                                },
+                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF22E3FF), contentColor = Color(0xFF0E1230)),
+                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                                            ) {
+                                                Text(if (res.platform.equals("YouTube", ignoreCase = true)) "فتح YouTube" else "فتح في المستكشف", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                            OutlinedButton(
+                                                onClick = {
+                                                    runCatching {
+                                                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(res.pageUrl)))
+                                                    }.onFailure {
+                                                        Toast.makeText(context, "تعذر فتح المتصفح الخارجي.", Toast.LENGTH_LONG).show()
+                                                    }
+                                                },
+                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                                            ) {
+                                                Text("المتصفح الخارجي", fontSize = 10.sp)
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -1286,12 +1346,16 @@ fun ToolsScreen(
                                             val socialPage = currentVerification
                                             isDownloading = false
                                             isVerifyingUrl = false
-                                            val message = if (socialPage.platform.equals("YouTube", ignoreCase = true)) {
-                                                socialPage.advice
+                                            if (socialPage.platform.equals("YouTube", ignoreCase = true)) {
+                                                Toast.makeText(context, socialPage.advice, Toast.LENGTH_LONG).show()
+                                                runCatching {
+                                                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(socialPage.pageUrl)))
+                                                }
                                             } else {
-                                                "هذا رابط صفحة ${socialPage.platform} وليس ملفاً مباشراً. افتح مستكشف الفيديو من الإعدادات لالتقاط مصدر متاح."
+                                                downloadUrl = socialPage.pageUrl
+                                                showDownloadDialog = false
+                                                showSnifferDialog = true
                                             }
-                                            Toast.makeText(context, message, Toast.LENGTH_LONG).show()
                                             return@launch
                                         }
 
@@ -1398,12 +1462,16 @@ fun ToolsScreen(
                                                     )
                                                 ) {
                                                     is com.example.media.RealMediaDownloader.VideoVerificationResult.SocialWebPage -> {
-                                                        Toast.makeText(
-                                                            context,
-                                                            if (check.platform.equals("YouTube", ignoreCase = true)) check.advice
-                                                            else "هذا رابط صفحة ${check.platform} وليس ملفاً مباشراً. افتح مستكشف الفيديو من الإعدادات.",
-                                                            Toast.LENGTH_LONG
-                                                        ).show()
+                                                        if (check.platform.equals("YouTube", ignoreCase = true)) {
+                                                            Toast.makeText(context, check.advice, Toast.LENGTH_LONG).show()
+                                                            runCatching {
+                                                                context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(check.pageUrl)))
+                                                            }
+                                                        } else {
+                                                            downloadUrl = check.pageUrl
+                                                            showDownloadDialog = false
+                                                            showSnifferDialog = true
+                                                        }
                                                     }
                                                     is com.example.media.RealMediaDownloader.VideoVerificationResult.Invalid -> {
                                                         Toast.makeText(context, check.reason, Toast.LENGTH_LONG).show()
@@ -1491,7 +1559,7 @@ fun ToolsScreen(
     // Web Video Sniffer Dialog
     if (showSnifferDialog) {
         WebVideoSnifferDialog(
-            initialUrl = if (downloadUrl.isNotBlank()) com.example.media.RealMediaDownloader.normalizeUrl(downloadUrl) else "https://www.facebook.com",
+            initialUrl = if (downloadUrl.isNotBlank()) com.example.media.RealMediaDownloader.normalizeUrl(downloadUrl) else "",
             onVideoFound = { source: com.example.media.CapturedVideoSource ->
                 downloadUrl = source.url
                 downloadRequestHeaders = source.requestHeaders

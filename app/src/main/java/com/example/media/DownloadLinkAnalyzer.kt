@@ -51,7 +51,7 @@ object DownloadLinkAnalyzer {
         "mp3", "m4a", "aac", "wav", "flac", "ogg", "opus", "wma", "aiff",
         "jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "svg", "avif",
         "pdf", "txt", "rtf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "csv", "json", "xml",
-        "epub", "mobi", "zip", "rar", "7z", "tar", "gz", "bz2", "xz", "apk", "aab", "obb", "iso",
+        "epub", "mobi", "zip", "rar", "7z", "tar", "gz", "bz2", "xz", "apk", "xapk", "apks", "aab", "obb", "jar", "iso",
         "bin", "dmg", "exe", "msi", "torrent", "ics", "vcf"
     )
 
@@ -120,11 +120,11 @@ object DownloadLinkAnalyzer {
                 "يبدو أن الرابط يشير إلى ملف قابل للتنزيل. سيفحص CinemaX نوع المحتوى والحجم قبل بدء التحميل."
             Route.SOCIAL_PAGE -> when (provider) {
                 Provider.YOUTUBE ->
-                    "هذا رابط صفحة YouTube وليس ملفاً مباشراً. لا يستخرج CinemaX روابط YouTube الخاصة ولا يتجاوز DRM أو قيود المنصة؛ استخدم طرق التنزيل الرسمية أو رابط ملف يتيحه مالك المحتوى."
+                    "هذا رابط صفحة YouTube وليس ملفاً مباشراً. لا يحوّل CinemaX صفحة YouTube إلى ملف صوت أو فيديو؛ استخدم خيار التنزيل الرسمي المتاح في YouTube أو رابط ملف تملكه وتسمح بتنزيله."
                 Provider.TELEGRAM ->
                     "هذا رابط Telegram. افتح المنشور إذا كان متاحاً، أو استخدم مشاركة الملف من Telegram إلى CinemaX لتنزيل نسخة أرسلها لك التطبيق."
                 else ->
-                    "هذا رابط صفحة ${provider?.displayName ?: "موقع ويب"} وليس رابط ملف مباشر. يمكن للمستكشف التقاط ملف مباشر إذا أتاحه الموقع للمتصفح."
+                    "هذا رابط صفحة ${provider?.displayName ?: "موقع ويب"} وليس رابط ملف مباشر. يمكن للمستكشف التقاط ملف وسائط مباشر غير محمي فقط إذا أتاحه الموقع للمتصفح؛ وقد يتطلب الموقع فتحه في المتصفح أو التطبيق الرسمي."
             }
             Route.WEB_PAGE ->
                 "هذا رابط صفحة ويب. سيفحص CinemaX الاستجابة أولاً، وإذا كانت صفحة HTML فسيتيح فتحها في المستكشف بدلاً من حفظ صفحة ويب كأنها فيديو."

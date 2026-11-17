@@ -55,10 +55,16 @@ class RealMediaDownloaderRoutingTest {
         val pdf = com.example.media.DownloadLinkAnalyzer.analyze("https://cdn.example.net/docs/report.pdf")
         val archive = com.example.media.DownloadLinkAnalyzer.analyze("https://cdn.example.net/files/archive.zip")
         val audio = com.example.media.DownloadLinkAnalyzer.analyze("https://cdn.example.net/audio/track.mp3")
+        val apk = com.example.media.DownloadLinkAnalyzer.analyze("https://cdn.example.net/apps/game.apk")
+        val xapk = com.example.media.DownloadLinkAnalyzer.analyze("https://cdn.example.net/apps/game.xapk")
+        val apks = com.example.media.DownloadLinkAnalyzer.analyze("https://cdn.example.net/apps/game.apks")
 
         assertEquals(com.example.media.DownloadLinkAnalyzer.Route.DIRECT_FILE, pdf.route)
         assertEquals(com.example.media.DownloadLinkAnalyzer.Route.DIRECT_FILE, archive.route)
         assertEquals(com.example.media.DownloadLinkAnalyzer.Route.DIRECT_FILE, audio.route)
+        assertEquals(com.example.media.DownloadLinkAnalyzer.Route.DIRECT_FILE, apk.route)
+        assertEquals(com.example.media.DownloadLinkAnalyzer.Route.DIRECT_FILE, xapk.route)
+        assertEquals(com.example.media.DownloadLinkAnalyzer.Route.DIRECT_FILE, apks.route)
     }
 
     @Test
@@ -92,14 +98,14 @@ class RealMediaDownloaderRoutingTest {
     }
 
     @Test
-    fun webSnifferRecognizesOpaqueVideoUrlsButRejectsAudioAndHtml() {
+    fun webSnifferRecognizesOpaqueVideoAndAudioUrlsButRejectsHtml() {
         assertTrue(
             com.example.media.WebVideoSnifferHelper.isMediaStreamUrl(
                 "https://cdn.example.net/resource?id=video-123",
                 "video/mp4"
             )
         )
-        assertFalse(
+        assertTrue(
             com.example.media.WebVideoSnifferHelper.isMediaStreamUrl(
                 "https://cdn.example.net/audio?id=track-123",
                 "audio/mpeg"
@@ -121,7 +127,7 @@ class RealMediaDownloaderRoutingTest {
                 "video/mp4"
             )
         )
-        assertFalse(
+        assertTrue(
             com.example.media.WebVideoSnifferHelper.isMediaStreamUrl(
                 "https://cdn.example.net/opaque?id=123",
                 "audio/mpeg"

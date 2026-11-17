@@ -99,6 +99,7 @@ object RealMediaDownloader {
         mimeType.startsWith("audio/") || extension in setOf("mp3", "m4a", "aac", "wav", "flac", "ogg", "opus", "wma", "aiff") -> "صوت"
         mimeType.startsWith("image/") || extension in setOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "heic", "avif", "svg") -> "صورة"
         mimeType.contains("pdf") || extension in setOf("pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "rtf", "csv", "epub", "mobi") -> "مستند"
+        extension in setOf("apk", "xapk", "apks", "aab", "obb", "jar") -> "تطبيق أو لعبة"
         extension in setOf("zip", "rar", "7z", "tar", "gz", "bz2", "xz", "iso") -> "أرشيف"
         else -> "ملف"
     }
@@ -492,25 +493,10 @@ object RealMediaDownloader {
             )
         } catch (e: Exception) {
             conn?.disconnect()
-            val extension = fileExtensionFromUrl(trimmed)
-            if (DownloadLinkAnalyzer.isDownloadableExtension(extension)) {
-                val mimeType = mimeTypeForExtension(extension.orEmpty())
-                VideoVerificationResult.Valid(
-                    directUrl = trimmed,
-                    mimeType = mimeType,
-                    contentLength = -1L,
-                    format = extension.orEmpty().uppercase(Locale.ROOT),
-                    isResumable = false,
-                    server = null,
-                    fileName = Uri.parse(trimmed).lastPathSegment?.let(::sanitizeFileName)
-                        ?: "CinemaX_${System.currentTimeMillis()}.$extension",
-                    category = categoryFor(mimeType, extension.orEmpty())
-                )
-            } else {
-                VideoVerificationResult.Invalid(
-                    "تعذر التحقق من الرابط: " + (e.localizedMessage ?: "خطأ في الاتصال")
-                )
-            }
+            VideoVerificationResult.Invalid(
+                "تعذر الاتصال للتحقق من الملف. راجع الإنترنت أو أعد المحاولة: " +
+                    (e.localizedMessage ?: "خطأ غير معروف")
+            )
         }
     }
 
