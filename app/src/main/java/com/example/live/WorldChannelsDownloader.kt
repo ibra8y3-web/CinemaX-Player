@@ -102,7 +102,6 @@ object WorldChannelsDownloader {
                     onProgress(channels.size)
                 }
             }
-            }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to download M3U for ${countryPreset.nameAr}: ${e.message}")
         } finally {
