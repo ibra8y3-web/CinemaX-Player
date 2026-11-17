@@ -124,6 +124,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 import java.net.URL
+import java.util.UUID
 
 enum class ToolsSection { ALL, VIDEO, SETTINGS }
 
@@ -167,6 +168,109 @@ fun ToolsScreen(
     var isDownloading by remember { mutableStateOf(false) }
     var showSnifferDialog by remember { mutableStateOf(false) }
     var showDuplicateCleanerDialog by remember { mutableStateOf(false) }
+
+    // Universal website extractor states (yt-dlp + FFmpeg + aria2c).
+    var universalInfo by remember { mutableStateOf<com.example.media.UniversalMediaEngine.MediaInfo?>(null) }
+    var universalInfoUrl by remember { mutableStateOf("") }
+    var selectedUniversalFormat by remember { mutableStateOf<com.example.media.UniversalMediaEngine.FormatOption?>(null) }
+    var isUniversalInspecting by remember { mutableStateOf(false) }
+    var isUniversalDownloading by remember { mutableStateOf(false) }
+    var universalDownloadPercent by remember { mutableIntStateOf(0) }
+    var universalDownloadMessage by remember { mutableStateOf("") }
+    var universalProcessId by remember { mutableStateOf<String?>(null) }
+    var isUpdatingUniversalEngine by remember { mutableStateOf(false) }
+    var universalEngineVersionMessage by remember { mutableStateOf("") }
+
+    fun inspectWithUniversalEngine(rawUrl: String) {
+        val url = com.example.media.RealMediaDownloader.normalizeUrl(rawUrl)
+        if (url.isBlank()) {
+            Toast.makeText(context, "أدخل رابط صفحة أو ملف أولاً.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        universalInfoUrl = url
+        universalInfo = null
+        selectedUniversalFormat = null
+        isUniversalInspecting = true
+        universalEngineVersionMessage = ""
+        scope.launch {
+            try {
+                val info = com.example.media.UniversalMediaEngine.inspect(context, url)
+                universalInfo = info
+                selectedUniversalFormat = info.formats.firstOrNull { it.hasVideo } ?: info.formats.firstOrNull()
+                if (info.formats.isEmpty()) {
+                    universalEngineVersionMessage = "الموقع لم يعرض صيغ تنزيل قابلة للاختيار."
+                }
+            } catch (error: Exception) {
+                universalInfo = null
+                universalEngineVersionMessage = error.message ?: "تعذر تحليل الوسائط من هذا الموقع."
+                Toast.makeText(context, universalEngineVersionMessage, Toast.LENGTH_LONG).show()
+            } finally {
+                isUniversalInspecting = false
+            }
+        }
+    }
+
+    fun downloadWithUniversalEngine(
+        urls: List<String>,
+        audioOnly: Boolean = false,
+        selectedFormat: com.example.media.UniversalMediaEngine.FormatOption? = null
+    ) {
+        if (isUniversalDownloading) return
+        if (urls.isEmpty()) {
+            Toast.makeText(context, "لم يتم العثور على روابط صالحة للتنزيل.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val processId = UUID.randomUUID().toString()
+        universalProcessId = processId
+        universalDownloadPercent = 0
+        universalDownloadMessage = "تهيئة محركات استخراج المواقع..."
+        isUniversalDownloading = true
+
+        scope.launch {
+            try {
+                val files = com.example.media.UniversalMediaEngine.download(
+                    context = context,
+                    urls = urls,
+                    audioOnly = audioOnly,
+                    selectedFormat = selectedFormat,
+                    wifiOnly = wifiOnlyDownloads,
+                    processId = processId
+                ) { progress ->
+                    scope.launch(Dispatchers.Main) {
+                        universalDownloadPercent = progress.percent
+                        universalDownloadMessage = progress.message.ifBlank {
+                            if (progress.etaSeconds > 0) "المتبقي نحو ${progress.etaSeconds} ثانية" else "جاري التنزيل..."
+                        }
+                    }
+                }
+                onMediaChanged()
+                val totalBytes = files.sumOf { it.sizeBytes }
+                val megabytes = String.format("%.1f", totalBytes / (1024.0 * 1024.0))
+                Toast.makeText(
+                    context,
+                    "اكتمل تنزيل ${files.size} ملفاً عبر محرك المواقع — ${megabytes} MB",
+                    Toast.LENGTH_LONG
+                ).show()
+                universalDownloadPercent = 100
+                universalDownloadMessage = "اكتمل التنزيل وحُفظت الملفات في Downloads/CinemaX."
+            } catch (error: Exception) {
+                universalDownloadMessage = error.message ?: "تعذر تنزيل الوسائط من هذا المصدر."
+                Toast.makeText(context, universalDownloadMessage, Toast.LENGTH_LONG).show()
+            } finally {
+                isUniversalDownloading = false
+                universalProcessId = null
+            }
+        }
+    }
+
+    fun stopUniversalDownload() {
+        universalProcessId?.let { processId ->
+            val stopped = com.example.media.UniversalMediaEngine.stop(processId)
+            if (stopped) {
+                universalDownloadMessage = "تم إرسال أمر إيقاف محرك التنزيل."
+            }
+        }
+    }
 
     // Audio Extractor Tool States
     var showAudioExtractDialog by remember { mutableStateOf(false) }
@@ -295,6 +399,50 @@ fun ToolsScreen(
                         ),
                         modifier = Modifier.testTag("download_wifi_only_switch")
                     )
+                }
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            ToolCard(
+                icon = Icons.Default.Settings,
+                iconTint = Color(0xFF9D7BFF),
+                title = "محركات استخراج المواقع",
+                subtitle = "yt-dlp لتحليل المواقع المدعومة، FFmpeg لاستخراج الصوت ودمج المسارات، وaria2c للتنزيل المتوازي. يتطلب المحتوى أن يكون متاحاً للتنزيل ولا يتجاوز DRM أو صلاحيات الدخول.",
+                action = {
+                    Column(horizontalAlignment = Alignment.End) {
+                        Button(
+                            onClick = {
+                                if (!isUpdatingUniversalEngine) {
+                                    isUpdatingUniversalEngine = true
+                                    scope.launch {
+                                        try {
+                                            val status = com.example.media.UniversalMediaEngine.updateExtractor(context)
+                                            universalEngineVersionMessage = "حالة تحديث المحرك: $status"
+                                            Toast.makeText(context, universalEngineVersionMessage, Toast.LENGTH_LONG).show()
+                                        } catch (error: Exception) {
+                                            universalEngineVersionMessage = error.message ?: "تعذر تحديث محرك المواقع."
+                                            Toast.makeText(context, universalEngineVersionMessage, Toast.LENGTH_LONG).show()
+                                        } finally {
+                                            isUpdatingUniversalEngine = false
+                                        }
+                                    }
+                                }
+                            },
+                            enabled = !isUpdatingUniversalEngine,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFF9D7BFF),
+                                contentColor = Color.White
+                            )
+                        ) {
+                            if (isUpdatingUniversalEngine) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Color.White)
+                            } else {
+                                Text("تحديث مستخرجات المواقع", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                            }
+                        }
+                        if (universalEngineVersionMessage.isNotBlank()) {
+                            Text(universalEngineVersionMessage, color = Color(0xFFA9B4D6), fontSize = 9.sp)
+                        }
+                    }
                 }
             )
             Spacer(modifier = Modifier.height(12.dp))
@@ -960,6 +1108,9 @@ fun ToolsScreen(
                                 downloadRequestHeaders = emptyMap()
                                 downloadExpectedMimeType = null
                                 verificationResult = null
+                                universalInfo = null
+                                universalInfoUrl = ""
+                                selectedUniversalFormat = null
                             },
                             placeholder = { Text("الصق رابط ملف مباشر أو عدة روابط، كل رابط في سطر", color = Color(0xFF8B96BD), fontSize = 11.sp) },
                             minLines = 2,
@@ -1170,6 +1321,133 @@ fun ToolsScreen(
                                             Text("نوع المحتوى المكتشف: $it", color = Color(0xFFEF9A9A), fontSize = 10.sp)
                                         }
                                     }
+                                }
+                            }
+                        }
+                    }
+
+                    if (universalInfoUrl.isNotBlank() && universalInfoUrl == downloadUrl.trim()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF101B36)),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text("محرك المواقع", color = Color(0xFF22E3FF), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    if (isUniversalInspecting) {
+                                        CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = Color(0xFF22E3FF))
+                                    }
+                                }
+                                universalInfo?.let { info ->
+                                    Text(info.title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                    Text(
+                                        "${info.extractor} · ${info.formats.size} صيغة متاحة",
+                                        color = Color(0xFFA9B4D6),
+                                        fontSize = 10.sp
+                                    )
+                                    if (info.durationSeconds > 0) {
+                                        Text(
+                                            "المدة: ${info.durationSeconds / 60}:${(info.durationSeconds % 60).toString().padStart(2, '0')}",
+                                            color = Color(0xFFA9B4D6),
+                                            fontSize = 10.sp
+                                        )
+                                    }
+                                    if (info.formats.isNotEmpty()) {
+                                        Text("اختر الجودة:", color = Color(0xFFA9B4D6), fontSize = 10.sp)
+                                        Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                                            info.formats.take(6).forEach { format ->
+                                                val isSelected = selectedUniversalFormat?.formatId == format.formatId
+                                                OutlinedButton(
+                                                    onClick = { selectedUniversalFormat = format },
+                                                    colors = ButtonDefaults.outlinedButtonColors(
+                                                        containerColor = if (isSelected) Color(0xFF194E5D) else Color.Transparent,
+                                                        contentColor = if (isSelected) Color(0xFF2EE6A6) else Color(0xFFE6EAFA)
+                                                    ),
+                                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 3.dp),
+                                                    modifier = Modifier.fillMaxWidth()
+                                                ) {
+                                                    Row(
+                                                        modifier = Modifier.fillMaxWidth(),
+                                                        horizontalArrangement = Arrangement.SpaceBetween
+                                                    ) {
+                                                        Text(format.qualityLabel, fontSize = 10.sp)
+                                                        Text(
+                                                            when {
+                                                                format.hasVideo && format.hasAudio -> "صورة وصوت"
+                                                                format.hasVideo -> "فيديو"
+                                                                format.hasAudio -> "صوت"
+                                                                else -> "ملف"
+                                                            },
+                                                            color = Color(0xFFA9B4D6),
+                                                            fontSize = 9.sp
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Button(
+                                            onClick = {
+                                                downloadWithUniversalEngine(
+                                                    listOf(info.webpageUrl),
+                                                    audioOnly = false,
+                                                    selectedFormat = selectedUniversalFormat
+                                                )
+                                            },
+                                            enabled = !isUniversalDownloading,
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = Color(0xFF2EE6A6),
+                                                contentColor = Color(0xFF0E1230)
+                                            ),
+                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                                        ) {
+                                            Text("تنزيل الفيديو", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                        OutlinedButton(
+                                            onClick = {
+                                                downloadWithUniversalEngine(listOf(info.webpageUrl), audioOnly = true)
+                                            },
+                                            enabled = !isUniversalDownloading,
+                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                                        ) {
+                                            Text("استخراج MP3", fontSize = 10.sp)
+                                        }
+                                    }
+                                }
+                                if (universalEngineVersionMessage.isNotBlank() && universalInfo == null) {
+                                    Text(universalEngineVersionMessage, color = Color(0xFFFFC857), fontSize = 10.sp)
+                                }
+                            }
+                        }
+                    }
+
+                    if (isUniversalDownloading) {
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF0D1322)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("محرك المواقع يعمل...", color = Color(0xFF2EE6A6), fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                                    Text("${universalDownloadPercent}%", color = Color(0xFF22E3FF), fontSize = 11.sp)
+                                }
+                                LinearProgressIndicator(
+                                    progress = { (universalDownloadPercent / 100f).coerceIn(0f, 1f) },
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                                    color = Color(0xFF2EE6A6),
+                                    trackColor = Color(0xFF272D66)
+                                )
+                                Text(universalDownloadMessage, color = Color(0xFFA9B4D6), fontSize = 9.sp, maxLines = 2)
+                                TextButton(onClick = { stopUniversalDownload() }) {
+                                    Text("إيقاف محرك المواقع", color = Color(0xFFFF6B8B), fontSize = 10.sp)
                                 }
                             }
                         }
@@ -1440,6 +1718,26 @@ fun ToolsScreen(
                             modifier = Modifier.fillMaxWidth().testTag("start_download_btn")
                         ) {
                             Text("تنزيل الملف الآن مع السرعة الحية 🚀", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        }
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        OutlinedButton(
+                            onClick = {
+                                val links = DownloadLinkAnalyzer.extractUrls(downloadUrl)
+                                if (links.isEmpty()) {
+                                    Toast.makeText(context, "أدخل رابط موقع أو ملف HTTP/HTTPS أولاً.", Toast.LENGTH_SHORT).show()
+                                } else if (links.size == 1) {
+                                    inspectWithUniversalEngine(links.first())
+                                } else {
+                                    downloadWithUniversalEngine(links)
+                                }
+                            },
+                            enabled = !isUniversalDownloading && !isUniversalInspecting,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth().testTag("universal_media_engine_button")
+                        ) {
+                            Text("محرك المواقع: فحص جودة أو تنزيل عدة روابط", color = Color(0xFF9D7BFF), fontSize = 11.sp)
                         }
 
                         Spacer(modifier = Modifier.height(6.dp))
