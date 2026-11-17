@@ -154,6 +154,7 @@ fun ToolsScreen(
     var downloadRequestHeaders by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var isDownloading by remember { mutableStateOf(false) }
     var showSnifferDialog by remember { mutableStateOf(false) }
+    var returnToDownloadAfterSniffer by remember { mutableStateOf(false) }
     var showDuplicateCleanerDialog by remember { mutableStateOf(false) }
 
     // Audio Extractor Tool States
@@ -935,7 +936,11 @@ fun ToolsScreen(
 
                     // Quick Web Video Sniffer Option
                     OutlinedButton(
-                        onClick = { showSnifferDialog = true },
+                        onClick = {
+                            returnToDownloadAfterSniffer = true
+                            showDownloadDialog = false
+                            showSnifferDialog = true
+                        },
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF22E3FF)),
                         border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x6622E3FF)),
                         shape = RoundedCornerShape(8.dp),
@@ -1022,16 +1027,28 @@ fun ToolsScreen(
                                         Spacer(modifier = Modifier.height(4.dp))
                                         Text(res.advice, color = Color(0xFFE6EAFA), fontSize = 11.sp)
                                         Spacer(modifier = Modifier.height(8.dp))
-                                        Button(
-                                            onClick = { showSnifferDialog = true },
-                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF22E3FF), contentColor = Color(0xFF0E1230)),
-                                            shape = RoundedCornerShape(8.dp),
-                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
-                                            modifier = Modifier.fillMaxWidth().testTag("launch_sniffer_from_social_btn")
-                                        ) {
-                                            Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Text("استخراج والتقاط الفيديو عبر المستكشف المدمج 🌐", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                                        if (res.platform.equals("YouTube", ignoreCase = true)) {
+                                            Text(
+                                                "لا يبدأ التنزيل من رابط صفحة YouTube. استخدم خيار التنزيل الرسمي المتاح لحسابك، أو رابط ملف مباشر يتيحه مالك المحتوى.",
+                                                color = Color(0xFFFFD180),
+                                                fontSize = 11.sp
+                                            )
+                                        } else {
+                                            Button(
+                                                onClick = {
+                                                    returnToDownloadAfterSniffer = true
+                                                    showDownloadDialog = false
+                                                    showSnifferDialog = true
+                                                },
+                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF22E3FF), contentColor = Color(0xFF0E1230)),
+                                                shape = RoundedCornerShape(8.dp),
+                                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                                                modifier = Modifier.fillMaxWidth().testTag("launch_sniffer_from_social_btn")
+                                            ) {
+                                                Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Text("فتح المستكشف لالتقاط ملف مباشر متاح 🌐", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                                            }
                                         }
                                     }
                                 }
@@ -1198,6 +1215,7 @@ fun ToolsScreen(
                                 val urlToDownload = com.example.media.RealMediaDownloader.normalizeUrl(downloadUrl)
                                 if (urlToDownload.isNotBlank()) {
                                     scope.launch {
+                                        try {
                                         // 1. Enforce Verification
                                         var currentVerification = verificationResult
                                         if (currentVerification == null) {
@@ -1208,12 +1226,19 @@ fun ToolsScreen(
                                         }
 
                                         if (currentVerification is com.example.media.RealMediaDownloader.VideoVerificationResult.SocialWebPage) {
-                                            showSnifferDialog = true
-                                            Toast.makeText(context, "جاري فتح المستكشف الذكي لالتقاط الفيديو وتفادي خطأ 400...", Toast.LENGTH_SHORT).show()
+                                            val socialPage = currentVerification
+                                            if (socialPage.platform.equals("YouTube", ignoreCase = true)) {
+                                                isDownloading = false
+                                                isVerifyingUrl = false
+                                                Toast.makeText(context, socialPage.advice, Toast.LENGTH_LONG).show()
+                                            } else {
+                                                returnToDownloadAfterSniffer = true
+                                                showDownloadDialog = false
+                                                showSnifferDialog = true
+                                                Toast.makeText(context, "تم فتح المستكشف. شغّل الفيديو أولاً، وسيظهر الملف المباشر إذا أتاحه الموقع.", Toast.LENGTH_LONG).show()
+                                            }
                                             return@launch
                                         }
-
-                                        val directUrl = (currentVerification as? com.example.media.RealMediaDownloader.VideoVerificationResult.Valid)?.directUrl ?: urlToDownload
 
                                         if (currentVerification is com.example.media.RealMediaDownloader.VideoVerificationResult.Invalid) {
                                             Toast.makeText(context, currentVerification.reason, Toast.LENGTH_LONG).show()
@@ -1271,6 +1296,16 @@ fun ToolsScreen(
                                                 }
                                             }
                                         }
+                                        } catch (error: Exception) {
+                                            isDownloading = false
+                                            isDownloadPaused = false
+                                            isVerifyingUrl = false
+                                            Toast.makeText(
+                                                context,
+                                                "تعذر بدء التنزيل: ${error.localizedMessage ?: "تحقق من الرابط والاتصال"}",
+                                                Toast.LENGTH_LONG
+                                            ).show()
+                                        }
                                     }
                                 } else {
                                     Toast.makeText(context, "يرجى إدخال أو لصق رابط الفيديو أولاً!", Toast.LENGTH_SHORT).show()
@@ -1298,8 +1333,17 @@ fun ToolsScreen(
                                             isVerifyingUrl = false
                                         }
                                         if (currentVerification is com.example.media.RealMediaDownloader.VideoVerificationResult.SocialWebPage) {
-                                            showSnifferDialog = true
-                                            Toast.makeText(context, "جاري فتح المستكشف الذكي لالتقاط الفيديو وتفادي خطأ 400...", Toast.LENGTH_SHORT).show()
+                                            val socialPage = currentVerification
+                                            if (socialPage.platform.equals("YouTube", ignoreCase = true)) {
+                                                isDownloading = false
+                                                isVerifyingUrl = false
+                                                Toast.makeText(context, socialPage.advice, Toast.LENGTH_LONG).show()
+                                            } else {
+                                                returnToDownloadAfterSniffer = true
+                                                showDownloadDialog = false
+                                                showSnifferDialog = true
+                                                Toast.makeText(context, "تم فتح المستكشف. شغّل الفيديو أولاً، وسيظهر الملف المباشر إذا أتاحه الموقع.", Toast.LENGTH_LONG).show()
+                                            }
                                             return@launch
                                         }
 
@@ -1365,11 +1409,18 @@ fun ToolsScreen(
                 downloadUrl = source.url
                 downloadRequestHeaders = source.requestHeaders
                 verificationResult = null
+                returnToDownloadAfterSniffer = false
                 showSnifferDialog = false
                 showDownloadDialog = true
-                Toast.makeText(context, "🎯 تم التقاط رابط الفيديو المباشر بنجاح! اضغط 'بدء التحميل المباشر' الآن", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, "تم التقاط رابط مباشر. افحصه ثم ابدأ التنزيل.", Toast.LENGTH_LONG).show()
             },
-            onDismiss = { showSnifferDialog = false }
+            onDismiss = {
+                showSnifferDialog = false
+                if (returnToDownloadAfterSniffer) {
+                    returnToDownloadAfterSniffer = false
+                    showDownloadDialog = true
+                }
+            }
         )
     }
 
