@@ -1,8 +1,10 @@
 package com.example.media
 
+import android.Manifest
 import android.app.DownloadManager
 import android.content.ContentValues
 import android.content.Context
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.os.Build
@@ -498,7 +500,13 @@ object RealMediaDownloader {
                 mimeType?.startsWith("image/") == true -> Environment.DIRECTORY_PICTURES
                 else -> Environment.DIRECTORY_DOWNLOADS
             }
-            setDestinationInExternalPublicDir(mediaDirectory, "CinemaXPlayer/$fileName")
+            val hasLegacyWritePermission = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q ||
+                context.checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+            if (hasLegacyWritePermission) {
+                setDestinationInExternalPublicDir(mediaDirectory, "CinemaXPlayer/$fileName")
+            } else {
+                setDestinationInExternalFilesDir(context, mediaDirectory, "CinemaXPlayer/$fileName")
+            }
             mimeType?.takeIf { it.isNotBlank() }?.let { setMimeType(it) }
             addRequestHeader("User-Agent", requestHeaders.entries.firstOrNull { it.key.equals("User-Agent", true) }?.value ?: USER_AGENT_CHROME)
             addRequestHeader("Accept", requestHeaders.entries.firstOrNull { it.key.equals("Accept", true) }?.value ?: "*/*")
@@ -799,8 +807,14 @@ object RealMediaDownloader {
             }
         }
 
-        val publicBase = Environment.getExternalStoragePublicDirectory(folderName)
-        val targetDirectory = File(publicBase, appFolder)
+        val hasLegacyWritePermission =
+            context.checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+        val baseDirectory = if (hasLegacyWritePermission) {
+            Environment.getExternalStoragePublicDirectory(folderName)
+        } else {
+            context.getExternalFilesDir(folderName) ?: File(context.filesDir, folderName)
+        }
+        val targetDirectory = File(baseDirectory, appFolder)
         if (!targetDirectory.exists() && !targetDirectory.mkdirs()) {
             throw IllegalStateException("تعذر إنشاء مجلد التنزيلات.")
         }

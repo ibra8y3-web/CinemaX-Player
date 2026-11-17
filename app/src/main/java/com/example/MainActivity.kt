@@ -44,11 +44,26 @@ class MainActivity : ComponentActivity() {
         const val ACTION_PIP_FORWARD = "com.example.cinemax.ACTION_PIP_FORWARD"
     }
 
+    private fun refreshReadableMedia() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.READ_MEDIA_VIDEO) == PackageManager.PERMISSION_GRANTED) {
+                viewModel.loadLocalVideos()
+            }
+            if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.READ_MEDIA_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                viewModel.loadLocalAudioFiles()
+            }
+        } else if (
+            ContextCompat.checkSelfPermission(this, android.Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED
+        ) {
+            viewModel.loadLocalVideos()
+            viewModel.loadLocalAudioFiles()
+        }
+    }
+
     private val downloadCompleteReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (intent?.action == DownloadManager.ACTION_DOWNLOAD_COMPLETE) {
-                viewModel.loadLocalVideos()
-                viewModel.loadLocalAudioFiles()
+                refreshReadableMedia()
             }
         }
     }
