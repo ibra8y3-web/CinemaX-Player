@@ -62,6 +62,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
@@ -125,24 +126,49 @@ fun VideosScreen(
     var videoToCast by remember { mutableStateOf<LocalVideo?>(null) }
     var videoToDelete by remember { mutableStateOf<LocalVideo?>(null) }
     var pendingConsentVideo by remember { mutableStateOf<LocalVideo?>(null) }
+    var pendingConsentVideos by remember { mutableStateOf<List<LocalVideo>>(emptyList()) }
+    var isSelectionMode by remember { mutableStateOf(false) }
+    var selectedVideoIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
+    var showBulkDeleteDialog by remember { mutableStateOf(false) }
+
+    fun toggleVideoSelection(videoId: Long) {
+        selectedVideoIds = if (videoId in selectedVideoIds) {
+            selectedVideoIds - videoId
+        } else {
+            selectedVideoIds + videoId
+        }
+    }
 
     // Launcher for system MediaStore Scoped Storage delete confirmation (Android 10/11+)
     val deleteConsentLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartIntentSenderForResult()
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
-            val v = pendingConsentVideo
-            if (v != null) {
+            val bulkTargets = pendingConsentVideos
+            if (bulkTargets.isNotEmpty()) {
                 scope.launch {
                     val scanner = MediaScanner(context)
-                    scanner.finalizeDeletion(v)
-                    Toast.makeText(context, "تم حذف الفيديو نهائياً من ذاكرة الهاتف والمعرض", Toast.LENGTH_SHORT).show()
+                    bulkTargets.forEach { scanner.finalizeDeletion(it) }
+                    selectedVideoIds = emptySet()
+                    isSelectionMode = false
+                    Toast.makeText(context, "تم حذف ${bulkTargets.size} فيديوهات من الهاتف", Toast.LENGTH_SHORT).show()
                     onRefresh()
+                }
+            } else {
+                val video = pendingConsentVideo
+                if (video != null) {
+                    scope.launch {
+                        val scanner = MediaScanner(context)
+                        scanner.finalizeDeletion(video)
+                        Toast.makeText(context, "تم حذف الفيديو نهائياً من ذاكرة الهاتف والمعرض", Toast.LENGTH_SHORT).show()
+                        onRefresh()
+                    }
                 }
             }
         } else {
             Toast.makeText(context, "تم إلغاء عملية حذف الفيديو", Toast.LENGTH_SHORT).show()
         }
+        pendingConsentVideos = emptyList()
         pendingConsentVideo = null
     }
 
@@ -311,6 +337,23 @@ fun VideosScreen(
                     )
                 }
             }
+
+            IconButton(
+                onClick = {
+                    isSelectionMode = !isSelectionMode
+                    if (!isSelectionMode) selectedVideoIds = emptySet()
+                },
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .background(if (isSelectionMode) Color(0xFF194D4A) else Color(0xFF1A1F4A))
+                    .testTag("toggle_video_selection_mode")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.CheckCircle,
+                    contentDescription = if (isSelectionMode) "إلغاء التحديد" else "تحديد عدة فيديوهات",
+                    tint = if (isSelectionMode) Color(0xFF2EE6A6) else Color(0xFFA9B4D6)
+                )
+            }
         }
 
         // Category Filter Chips
@@ -388,24 +431,60 @@ fun VideosScreen(
                 }
             }
         } else {
-            // Videos Count Subtitle
+            // Library count and bulk-selection actions
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text(
-                    text = "${filteredVideos.size} مقطع فيديو",
-                    color = Color(0xFFA9B4D6),
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium
-                )
-                Text(
-                    text = MediaScanner.formatFileSize(filteredVideos.sumOf { it.sizeBytes }),
-                    color = Color(0xFF8B96BD),
-                    fontSize = 12.sp
-                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = if (isSelectionMode) "تم تحديد ${selectedVideoIds.size} من ${filteredVideos.size}" else "${filteredVideos.size} مقطع فيديو",
+                        color = if (isSelectionMode) Color(0xFF2EE6A6) else Color(0xFFA9B4D6),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    if (!isSelectionMode) {
+                        Text(
+                            text = MediaScanner.formatFileSize(filteredVideos.sumOf { it.sizeBytes }),
+                            color = Color(0xFF8B96BD),
+                            fontSize = 10.sp
+                        )
+                    }
+                }
+                if (isSelectionMode) {
+                    TextButton(
+                        onClick = { selectedVideoIds = filteredVideos.map { it.id }.toSet() },
+                        enabled = filteredVideos.isNotEmpty()
+                    ) { Text("تحديد الكل", fontSize = 10.sp) }
+                    TextButton(
+                        onClick = {
+                            selectedVideoIds = emptySet()
+                            isSelectionMode = false
+                        }
+                    ) { Text("إلغاء", fontSize = 10.sp) }
+                    Button(
+                        onClick = { showBulkDeleteDialog = true },
+                        enabled = selectedVideoIds.isNotEmpty(),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6B8B)),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 5.dp),
+                        modifier = Modifier.testTag("delete_selected_videos_btn")
+                    ) {
+                        Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("حذف", fontSize = 10.sp)
+                    }
+                } else {
+                    TextButton(
+                        onClick = {
+                            isSelectionMode = true
+                            selectedVideoIds = emptySet()
+                        },
+                        modifier = Modifier.testTag("start_video_selection_btn")
+                    ) { Text("تحديد عدة فيديوهات", fontSize = 10.sp) }
+                }
             }
 
             if (isGridView) {
@@ -420,11 +499,16 @@ fun VideosScreen(
                         VideoGridCard(
                             video = video,
                             isFavorite = favorites.contains(video.uri),
-                            onClick = { onVideoClick(video) },
+                            onClick = {
+                                if (isSelectionMode) toggleVideoSelection(video.id) else onVideoClick(video)
+                            },
                             onToggleFavorite = { onToggleFavorite(video) },
                             onEncrypt = { onEncryptToVault(video) },
                             onCast = { videoToCast = video },
-                            onDelete = { videoToDelete = video }
+                            onDelete = { videoToDelete = video },
+                            isSelectionMode = isSelectionMode,
+                            isSelected = video.id in selectedVideoIds,
+                            onToggleSelection = { toggleVideoSelection(video.id) }
                         )
                     }
                 }
@@ -438,11 +522,16 @@ fun VideosScreen(
                         VideoListCard(
                             video = video,
                             isFavorite = favorites.contains(video.uri),
-                            onClick = { onVideoClick(video) },
+                            onClick = {
+                                if (isSelectionMode) toggleVideoSelection(video.id) else onVideoClick(video)
+                            },
                             onToggleFavorite = { onToggleFavorite(video) },
                             onEncrypt = { onEncryptToVault(video) },
                             onCast = { videoToCast = video },
-                            onDelete = { videoToDelete = video }
+                            onDelete = { videoToDelete = video },
+                            isSelectionMode = isSelectionMode,
+                            isSelected = video.id in selectedVideoIds,
+                            onToggleSelection = { toggleVideoSelection(video.id) }
                         )
                     }
                 }
@@ -501,6 +590,64 @@ fun VideosScreen(
                     }
                 },
                 containerColor = Color(0xFF1A1F4A)
+            )
+        }
+        if (showBulkDeleteDialog) {
+            val targets = videos.filter { it.id in selectedVideoIds }
+            AlertDialog(
+                onDismissRequest = { showBulkDeleteDialog = false },
+                containerColor = Color(0xFF1A1F4A),
+                title = {
+                    Text("حذف الفيديوهات المحددة", color = Color.White, fontWeight = FontWeight.Bold)
+                },
+                text = {
+                    Text(
+                        "سيتم حذف ${targets.size} فيديو من الجهاز والمعرض. لا يمكن التراجع عن الحذف.",
+                        color = Color(0xFFC3CCE8),
+                        fontSize = 13.sp
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        enabled = targets.isNotEmpty(),
+                        onClick = {
+                            showBulkDeleteDialog = false
+                            scope.launch {
+                                val scanner = MediaScanner(context)
+                                when (
+                                    val result = scanner.requestBatchDeleteUris(
+                                        uris = targets.map { Uri.parse(it.uri) },
+                                        fallbackPaths = targets.map { it.path }
+                                    )
+                                ) {
+                                    is MediaScanner.MediaDeleteResult.DirectSuccess -> {
+                                        targets.forEach { scanner.finalizeDeletion(it) }
+                                        selectedVideoIds = emptySet()
+                                        isSelectionMode = false
+                                        Toast.makeText(context, "تم حذف ${targets.size} فيديوهات بنجاح", Toast.LENGTH_LONG).show()
+                                        onRefresh()
+                                    }
+                                    is MediaScanner.MediaDeleteResult.RequiresConsent -> {
+                                        pendingConsentVideos = targets
+                                        deleteConsentLauncher.launch(
+                                            androidx.activity.result.IntentSenderRequest.Builder(result.intentSender).build()
+                                        )
+                                    }
+                                    is MediaScanner.MediaDeleteResult.Failed -> {
+                                        Toast.makeText(context, result.reason, Toast.LENGTH_LONG).show()
+                                    }
+                                }
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6B8B)),
+                        modifier = Modifier.testTag("confirm_delete_selected_videos_btn")
+                    ) { Text("حذف المحدد", color = Color.White) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showBulkDeleteDialog = false }) {
+                        Text("إلغاء", color = Color(0xFFA9B4D6))
+                    }
+                }
             )
         }
     }
@@ -601,14 +748,22 @@ fun VideoListCard(
     onToggleFavorite: () -> Unit,
     onEncrypt: () -> Unit,
     onCast: (() -> Unit)? = null,
-    onDelete: (() -> Unit)? = null
+    onDelete: (() -> Unit)? = null,
+    isSelectionMode: Boolean = false,
+    isSelected: Boolean = false,
+    onToggleSelection: () -> Unit = {}
 ) {
     var showMenu by remember { mutableStateOf(false) }
 
     Card(
         shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1F4A)),
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF272D66)),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isSelected) Color(0xFF193B4A) else Color(0xFF1A1F4A)
+        ),
+        border = androidx.compose.foundation.BorderStroke(
+            if (isSelected) 2.dp else 1.dp,
+            if (isSelected) Color(0xFF2EE6A6) else Color(0xFF272D66)
+        ),
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onClick() }
@@ -728,6 +883,13 @@ fun VideoListCard(
 
             // Compact Action Buttons
             Row(verticalAlignment = Alignment.CenterVertically) {
+                if (isSelectionMode) {
+                    Checkbox(
+                        checked = isSelected,
+                        onCheckedChange = { onToggleSelection() },
+                        modifier = Modifier.testTag("select_video_${video.id}")
+                    )
+                }
                 IconButton(
                     onClick = onToggleFavorite,
                     modifier = Modifier.size(32.dp)
@@ -801,11 +963,20 @@ fun VideoGridCard(
     onToggleFavorite: () -> Unit,
     onEncrypt: () -> Unit,
     onCast: (() -> Unit)? = null,
-    onDelete: (() -> Unit)? = null
+    onDelete: (() -> Unit)? = null,
+    isSelectionMode: Boolean = false,
+    isSelected: Boolean = false,
+    onToggleSelection: () -> Unit = {}
 ) {
     Card(
         shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1F4A)),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isSelected) Color(0xFF193B4A) else Color(0xFF1A1F4A)
+        ),
+        border = androidx.compose.foundation.BorderStroke(
+            if (isSelected) 2.dp else 1.dp,
+            if (isSelected) Color(0xFF2EE6A6) else Color.Transparent
+        ),
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onClick() }
@@ -861,7 +1032,16 @@ fun VideoGridCard(
                         .padding(4.dp),
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    if (onDelete != null) {
+                    if (isSelectionMode) {
+                        Checkbox(
+                            checked = isSelected,
+                            onCheckedChange = { onToggleSelection() },
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .background(Color(0x99000000))
+                                .testTag("select_video_grid_${video.id}")
+                        )
+                    } else if (onDelete != null) {
                         IconButton(
                             onClick = onDelete,
                             modifier = Modifier
@@ -873,7 +1053,7 @@ fun VideoGridCard(
                         }
                     }
 
-                    if (onCast != null) {
+                    if (!isSelectionMode && onCast != null) {
                         IconButton(
                             onClick = { onCast() },
                             modifier = Modifier
