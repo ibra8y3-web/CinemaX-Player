@@ -278,7 +278,12 @@ object RealMediaDownloader {
         if (analysis.route == DownloadLinkAnalyzer.Route.HLS_MANIFEST ||
             analysis.route == DownloadLinkAnalyzer.Route.DASH_MANIFEST
         ) {
-            return@withContext VideoVerificationResult.Invalid(analysis.advice)
+            val kind = if (analysis.route == DownloadLinkAnalyzer.Route.HLS_MANIFEST) "HLS" else "DASH"
+            return@withContext VideoVerificationResult.SocialWebPage(
+                pageUrl = trimmed,
+                platform = "قائمة بث $kind",
+                advice = "تم التعرف على قائمة بث $kind. سيحاول محرك المواقع تحليل الصيغ المتاحة وتنزيل المحتوى المسموح به بدلاً من حفظ القائمة كأنها ملف فيديو."
+            )
         }
         if (analysis.route == DownloadLinkAnalyzer.Route.SOCIAL_PAGE) {
             return@withContext VideoVerificationResult.SocialWebPage(
@@ -335,6 +340,13 @@ object RealMediaDownloader {
                 val contentType = active.contentType?.substringBefore(';')?.trim().orEmpty()
                 active.disconnect()
                 conn = null
+                if (analysis.route == DownloadLinkAnalyzer.Route.WEB_PAGE && expectedMimeType.isNullOrBlank()) {
+                    return@withContext VideoVerificationResult.SocialWebPage(
+                        pageUrl = trimmed,
+                        platform = "موقع ويب",
+                        advice = "تعذر فحص الرابط كملف مباشر (HTTP $responseCode). سيحاول محرك المواقع تحليل الصفحة بالطريقة المناسبة إذا كان المصدر مدعوماً ومتاحاً."
+                    )
+                }
                 return@withContext VideoVerificationResult.Invalid(
                     "الخادم رفض الطلب برمز $responseCode. قد يكون الرابط منتهياً أو يحتاج جلسة دخول صالحة.",
                     contentType.ifBlank { null }
@@ -493,10 +505,18 @@ object RealMediaDownloader {
             )
         } catch (e: Exception) {
             conn?.disconnect()
-            VideoVerificationResult.Invalid(
-                "تعذر الاتصال للتحقق من الملف. راجع الإنترنت أو أعد المحاولة: " +
-                    (e.localizedMessage ?: "خطأ غير معروف")
-            )
+            if (analysis.route == DownloadLinkAnalyzer.Route.WEB_PAGE && expectedMimeType.isNullOrBlank()) {
+                VideoVerificationResult.SocialWebPage(
+                    pageUrl = trimmed,
+                    platform = "موقع ويب",
+                    advice = "تعذر فحص الملف المباشر: ${e.localizedMessage ?: "خطأ اتصال"}. سيحاول محرك المواقع تحليل الصفحة إذا كان المصدر مدعوماً ومتاحاً."
+                )
+            } else {
+                VideoVerificationResult.Invalid(
+                    "تعذر الاتصال للتحقق من الملف. راجع الإنترنت أو أعد المحاولة: " +
+                        (e.localizedMessage ?: "خطأ غير معروف")
+                )
+            }
         }
     }
 

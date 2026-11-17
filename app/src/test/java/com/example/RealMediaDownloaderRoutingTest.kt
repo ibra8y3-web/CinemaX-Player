@@ -68,6 +68,19 @@ class RealMediaDownloaderRoutingTest {
     }
 
     @Test
+    fun pastedHlsAndDashLinksAreRoutedToUniversalWebsiteExtractor() = runBlocking {
+        val hls = RealMediaDownloader.verifyVideoBeforeDownload(
+            "https://cdn.example.net/live/index.m3u8"
+        )
+        val dash = RealMediaDownloader.verifyVideoBeforeDownload(
+            "https://cdn.example.net/live/manifest.mpd"
+        )
+
+        assertTrue(hls is RealMediaDownloader.VideoVerificationResult.SocialWebPage)
+        assertTrue(dash is RealMediaDownloader.VideoVerificationResult.SocialWebPage)
+    }
+
+    @Test
     fun streamingManifestsAreNotMistakenForSingleFiles() {
         val hls = com.example.media.DownloadLinkAnalyzer.analyze("https://cdn.example.net/live/index.m3u8")
         val dash = com.example.media.DownloadLinkAnalyzer.analyze("https://cdn.example.net/live/manifest.mpd")
