@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability / الإبلاغ عن ثغرة أمنية
+    url: https://github.com/ibra8y3-web/CinemaX-Player/security
+    about: لا تنشر الثغرات في البلاغات العامة. راجع SECURITY.md واستخدم الإبلاغ الخاص عند توفره.
+  - name: Support and documentation / الدعم والتوثيق
+    url: https://github.com/ibra8y3-web/CinemaX-Player/blob/main/SUPPORT.md
+    about: راجع خطوات الدعم قبل فتح بلاغ جديد.

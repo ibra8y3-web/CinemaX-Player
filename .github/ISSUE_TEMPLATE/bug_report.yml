@@ -1,0 +1,70 @@
+name: Bug report
+description: الإبلاغ عن خطأ أو سلوك غير متوقع في CinemaX Player
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        رجاءً لا تضع كلمات مرور أو PIN أو رموز جلسات أو روابط موقعة أو بيانات شخصية في البلاغ.
+        للثغرات الأمنية، استخدم SECURITY.md ولا تنشئ بلاغًا عامًا.
+  - type: input
+    id: app-version
+    attributes:
+      label: إصدار التطبيق
+      description: مثل 1.0 أو رقم Commit / GitHub Actions run.
+      placeholder: "1.0"
+    validations:
+      required: true
+  - type: input
+    id: android-version
+    attributes:
+      label: إصدار Android
+      placeholder: "Android 14"
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: الجهاز
+      placeholder: "الشركة والطراز"
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: خطوات إعادة المشكلة
+      description: اكتب خطوات مرقمة يمكن اتباعها لإعادة المشكلة.
+      placeholder: |
+        1. افتح...
+        2. اضغط...
+        3. تظهر المشكلة...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: السلوك المتوقع
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: السلوك الفعلي
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: سجل الخطأ أو لقطات الشاشة (اختياري)
+      description: احذف أي بيانات تعريفية أو أسرار قبل الإرفاق.
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: تأكيدات
+      options:
+        - label: بحثت في Issues المفتوحة ولم أجد بلاغًا مطابقًا.
+          required: true
+        - label: أزلت كلمات المرور والرموز والبيانات الشخصية من المحتوى.
+          required: true

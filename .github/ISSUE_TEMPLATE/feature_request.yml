@@ -1,0 +1,53 @@
+name: Feature request
+description: اقتراح ميزة أو تحسين جديد
+title: "[Feature]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        اشرح المشكلة أو الحاجة أولًا، ثم صِف الحل المقترح. لا تضع بيانات خاصة أو مفاتيح API.
+  - type: textarea
+    id: problem
+    attributes:
+      label: المشكلة أو الحاجة
+      description: ما الذي تريد إنجازه ولا تستطيع فعله حاليًا؟
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: الحل المقترح
+      description: صف السلوك المطلوب أو تجربة الاستخدام.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: البدائل التي جربتها (اختياري)
+    validations:
+      required: false
+  - type: dropdown
+    id: area
+    attributes:
+      label: القسم المتأثر
+      options:
+        - مشغل الفيديو
+        - الموسيقى والصوت
+        - الراديو
+        - القنوات المباشرة
+        - التنزيل وأدوات الوسائط
+        - الخزنة والخصوصية
+        - المشاركة والمزامنة
+        - المركز الإسلامي
+        - الواجهة وتجربة الاستخدام
+        - البناء والتوثيق
+        - غير ذلك
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: تأكيدات
+      options:
+        - label: بحثت في Issues المفتوحة عن اقتراح مشابه.
+          required: true
