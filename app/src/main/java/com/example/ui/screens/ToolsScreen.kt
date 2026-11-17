@@ -1097,7 +1097,7 @@ fun ToolsScreen(
             text = {
                 Column {
                     Text(
-                        text = "أدخل رابط ملف مباشر. سيتم فحص النوع والحجم قبل بدء التنزيل. روابط الصفحات ليست ملفات مباشرة.",
+                        text = "الصق رابط الفيديو أو صفحة الموقع مباشرة. CinemaX سيكتشف المصدر ويختار طريقة التنزيل تلقائياً.",
                         color = Color(0xFFA9B4D6),
                         fontSize = 10.sp,
                         modifier = Modifier.padding(bottom = 10.dp)
@@ -1118,7 +1118,7 @@ fun ToolsScreen(
                                 universalInfoUrl = ""
                                 selectedUniversalFormat = null
                             },
-                            placeholder = { Text("الصق رابط ملف مباشر أو عدة روابط، كل رابط في سطر", color = Color(0xFF8B96BD), fontSize = 11.sp) },
+                            placeholder = { Text("الصق رابط Facebook أو TikTok أو Instagram أو أي صفحة فيديو أو رابط ملف...", color = Color(0xFF8B96BD), fontSize = 11.sp) },
                             minLines = 2,
                             maxLines = 5,
                             enabled = !isDownloading && !isDownloadPaused,
@@ -1162,7 +1162,7 @@ fun ToolsScreen(
                     }
 
                     Text(
-                        "يدعم روابط الملفات المباشرة للفيديو والصوت وAPK وXAPK وZIP والمستندات. لتنزيل عدة ملفات الصق كل رابط في سطر ثم اختر الإضافة للخلفية.",
+                        "لا تحتاج لمعرفة نوع الرابط: الصق رابط صفحة الفيديو أو رابط الملف واضغط تنزيل. يدعم تنزيل الصفحات التي يستطيع محرك المواقع تحليلها، والملفات المباشرة، مع بقاء المواقع المحمية أو غير المدعومة خارج نطاق الاستخراج.",
                         color = Color(0xFF9EABD0),
                         fontSize = 9.sp,
                         modifier = Modifier.padding(top = 5.dp, bottom = 4.dp)
@@ -1620,11 +1620,46 @@ fun ToolsScreen(
                                             val socialPage = currentVerification
                                             isDownloading = false
                                             isVerifyingUrl = false
-                                            inspectWithUniversalEngine(socialPage.pageUrl, downloadRequestHeaders)
+                                            verificationResult = null
+                                            universalInfo = null
+                                            universalInfoUrl = ""
+                                            selectedUniversalFormat = null
+                                            Toast.makeText(
+                                                context,
+                                                "تم اكتشاف صفحة فيديو — جاري استخراج الوسائط وبدء التنزيل تلقائياً...",
+                                                Toast.LENGTH_LONG
+                                            ).show()
+                                            downloadWithUniversalEngine(
+                                                urls = listOf(socialPage.pageUrl),
+                                                requestHeaders = downloadRequestHeaders
+                                            )
                                             return@launch
                                         }
 
                                         if (currentVerification is com.example.media.RealMediaDownloader.VideoVerificationResult.Invalid) {
+                                            val route = DownloadLinkAnalyzer.analyze(urlToDownload).route
+                                            if (route == DownloadLinkAnalyzer.Route.WEB_PAGE &&
+                                                downloadExpectedMimeType.isNullOrBlank()
+                                            ) {
+                                                // A normal website URL is not a bad link merely because
+                                                // it does not respond like a direct file. Let yt-dlp resolve
+                                                // the page and download the best available media itself.
+                                                isVerifyingUrl = false
+                                                verificationResult = null
+                                                universalInfo = null
+                                                universalInfoUrl = ""
+                                                selectedUniversalFormat = null
+                                                Toast.makeText(
+                                                    context,
+                                                    "الرابط صفحة موقع — جاري تحليلها وتنزيل الفيديو تلقائياً...",
+                                                    Toast.LENGTH_LONG
+                                                ).show()
+                                                downloadWithUniversalEngine(
+                                                    urls = listOf(urlToDownload),
+                                                    requestHeaders = downloadRequestHeaders
+                                                )
+                                                return@launch
+                                            }
                                             Toast.makeText(context, currentVerification.reason, Toast.LENGTH_LONG).show()
                                             return@launch
                                         }
@@ -1704,7 +1739,7 @@ fun ToolsScreen(
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2EE6A6), contentColor = Color(0xFF0E1230)),
                             modifier = Modifier.fillMaxWidth().testTag("start_download_btn")
                         ) {
-                            Text("تنزيل الملف الآن مع السرعة الحية 🚀", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Text("تنزيل الرابط تلقائياً 🚀", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                         }
 
                         Spacer(modifier = Modifier.height(6.dp))
@@ -1724,7 +1759,7 @@ fun ToolsScreen(
                             shape = RoundedCornerShape(8.dp),
                             modifier = Modifier.fillMaxWidth().testTag("universal_media_engine_button")
                         ) {
-                            Text("محرك المواقع: فحص جودة أو تنزيل عدة روابط", color = Color(0xFF9D7BFF), fontSize = 11.sp)
+                            Text("فحص متقدم للجودة أو تنزيل عدة روابط", color = Color(0xFF9D7BFF), fontSize = 11.sp)
                         }
 
                         Spacer(modifier = Modifier.height(6.dp))
