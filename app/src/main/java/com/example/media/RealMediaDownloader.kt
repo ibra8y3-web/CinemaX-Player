@@ -614,87 +614,21 @@ object RealMediaDownloader {
                 return@withContext
             }
 
-            // Download Complete! Transfer tempFile to Public MediaStore / Downloads
-            // Servers often answer application/octet-stream (-> ".bin" files). Fall back to the URL / mp4.
-            val finalMime = if (mimeType.startsWith("video/") || mimeType.startsWith("audio/")) mimeType
-                else when (getExtensionFromUrl(resolvedUrl)) {
-                    "mp3" -> "audio/mpeg"; "m4a", "aac" -> "audio/mp4"
-                    "mkv" -> "video/x-matroska"; "webm" -> "video/webm"
-                    "avi" -> "video/x-msvideo"; "mov" -> "video/quicktime"
-                    else -> "video/mp4"
-                }
-            val ext = getExtensionFromMimeOrUrl(finalMime, resolvedUrl)
-            val finalFileName = "CinemaX_${System.currentTimeMillis()}.$ext"
-            var savedPath: String? = null
-            val isVideo = finalMime.startsWith("video/") || ext in listOf("mp4", "mkv", "webm", "avi", "mov")
-
-            // 1. If Video on Android 10+ (Q+), insert directly into MediaStore.Video so it appears instantly in VideosScreen
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && isVideo) {
-                try {
-                    val videoValues = ContentValues().apply {
-                        put(MediaStore.Video.Media.DISPLAY_NAME, finalFileName)
-                        put(MediaStore.Video.Media.MIME_TYPE, if (finalMime.startsWith("video/")) finalMime else "video/mp4")
-                        put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/CinemaXPlayer")
-                        put(MediaStore.Video.Media.IS_PENDING, 1)
-                    }
-                    val videoUri = context.contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, videoValues)
-                    if (videoUri != null) {
-                        context.contentResolver.openOutputStream(videoUri)?.use { out ->
-                            FileInputStream(tempFile).use { inStream -> inStream.copyTo(out) }
-                        }
-                        videoValues.clear()
-                        videoValues.put(MediaStore.Video.Media.IS_PENDING, 0)
-                        context.contentResolver.update(videoUri, videoValues, null, null)
-                        savedPath = "مجلد الفيديوهات والمعرض (Movies/CinemaXPlayer/$finalFileName)"
-                    }
-                } catch (_: Exception) {}
-            }
-
-            // 2. Also save to Public Downloads if not saved as video or on older Android versions
-            if (savedPath == null) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    try {
-                        val values = ContentValues().apply {
-                            put(MediaStore.Downloads.DISPLAY_NAME, finalFileName)
-                            put(MediaStore.Downloads.MIME_TYPE, finalMime)
-                            put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
-                        }
-                        val uri = context.contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-                        if (uri != null) {
-                            context.contentResolver.openOutputStream(uri)?.use { out ->
-                                FileInputStream(tempFile).use { inStream -> inStream.copyTo(out) }
-                            }
-                            savedPath = "مجلد التحميلات العام والمعرض (Downloads/$finalFileName)"
-                        }
-                    } catch (_: Exception) {}
-                }
-            }
-
-            // 3. Fallback to direct public storage write and MediaScanner indexing
-            if (savedPath == null) {
-                val targetDir = Environment.getExternalStoragePublicDirectory(
-                    if (isVideo) Environment.DIRECTORY_MOVIES else Environment.DIRECTORY_DOWNLOADS
-                )
-                if (!targetDir.exists()) targetDir.mkdirs()
-                val targetFile = File(targetDir, finalFileName)
-                FileInputStream(tempFile).use { inStream ->
-                    FileOutputStream(targetFile).use { outStream ->
-                        inStream.copyTo(outStream)
-                    }
-                }
-                savedPath = targetFile.absolutePath
-                try {
-                    android.media.MediaScannerConnection.scanFile(
-                        context,
-                        arrayOf(targetFile.absolutePath),
-                        arrayOf(finalMime),
-                        null
-                    )
-                } catch (_: Exception) {}
-            }
+            // Preserve the server MIME type and filename rather than forcing every download to MP4.
+            val hintedMime = mimeTypeHint?.takeIf { it.isNotBlank() && it != "unknown" }
+            val finalMime = hintedMime ?: mimeType
+            val hintedName = sanitizeFileName(customFileName)
+            val nameExtension = hintedName?.substringAfterLast('.', "")?.takeIf { '.' in hintedName }
+            val extension = nameExtension?.lowercase(Locale.ROOT)
+                ?: getExtensionFromMimeOrUrl(finalMime, resolvedUrl)
+            val mappedMime = if (finalMime == "application/octet-stream" && extension != "bin") {
+                mimeTypeForExtension(extension)
+            } else finalMime
+            val finalFileName = hintedName ?: "CinemaX_\${System.currentTimeMillis()}.$extension"
+            val savedPath = saveDownloadedFile(context, tempFile, finalFileName, mappedMime)
 
             // Cleanup temp file
-            try { tempFile.delete() } catch (_: Exception) {}
+            runCatching { tempFile.delete() }
 
             onProgress(
                 DownloadProgress(
@@ -711,26 +645,133 @@ object RealMediaDownloader {
         }
     }
 
-    private fun getExtensionFromUrl(url: String): String {
-        val clean = url.lowercase(Locale.ROOT)
-        return when {
-            clean.contains(".mp4") -> "mp4"
-            clean.contains(".mkv") -> "mkv"
-            clean.contains(".webm") -> "webm"
-            clean.contains(".avi") -> "avi"
-            clean.contains(".mov") -> "mov"
-            clean.contains(".mp3") -> "mp3"
-            clean.contains(".m4a") -> "m4a"
-            clean.contains(".aac") -> "aac"
-            else -> "mp4"
+    data class SharedImportResult(
+        val fileName: String,
+        val mimeType: String,
+        val bytesCopied: Long,
+        val savedLocation: String
+    )
+
+    /**
+     * Imports a file shared from another Android app (Telegram, browser, file manager, etc.).
+     * The caller must retain the temporary URI permission granted by Android's Sharesheet.
+     */
+    suspend fun importSharedContent(context: Context, uri: Uri): SharedImportResult = withContext(Dispatchers.IO) {
+        val resolver = context.contentResolver
+        var displayName: String? = null
+        resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (index >= 0) displayName = cursor.getString(index)
+            }
+        }
+        val mimeType = resolver.getType(uri)?.takeIf { it.isNotBlank() } ?: "application/octet-stream"
+        val fallbackExtension = MimeTypeMap.getSingleton().getExtensionFromMimeType(mimeType) ?: "bin"
+        val safeName = sanitizeFileName(displayName) ?: "CinemaX_\${System.currentTimeMillis()}.$fallbackExtension"
+        val tempFile = File(
+            context.cacheDir,
+            "share_import_\${System.currentTimeMillis()}_\${safeName.hashCode().toUInt().toString(16)}.tmp"
+        )
+        try {
+            val input = resolver.openInputStream(uri)
+                ?: throw IllegalStateException("تعذر فتح الملف المرسل من التطبيق الآخر.")
+            var byteCount = 0L
+            input.use { source ->
+                FileOutputStream(tempFile).use { target ->
+                    val buffer = ByteArray(64 * 1024)
+                    while (true) {
+                        val count = source.read(buffer)
+                        if (count < 0) break
+                        target.write(buffer, 0, count)
+                        byteCount += count
+                    }
+                    target.flush()
+                }
+            }
+            if (byteCount <= 0L) throw IllegalStateException("الملف المرسل فارغ أو غير قابل للقراءة.")
+            val saved = saveDownloadedFile(context, tempFile, safeName, mimeType)
+            SharedImportResult(safeName, mimeType, byteCount, saved)
+        } finally {
+            runCatching { tempFile.delete() }
         }
     }
 
+    private fun saveDownloadedFile(
+        context: Context,
+        sourceFile: File,
+        requestedName: String,
+        mimeType: String
+    ): String {
+        val name = sanitizeFileName(requestedName) ?: "CinemaX_\${System.currentTimeMillis()}.bin"
+        val mime = mimeType.takeIf { it.isNotBlank() } ?: "application/octet-stream"
+        val isVideo = mime.startsWith("video/")
+        val isAudio = mime.startsWith("audio/")
+        val isImage = mime.startsWith("image/")
+        val folderName = when {
+            isVideo -> Environment.DIRECTORY_MOVIES
+            isAudio -> Environment.DIRECTORY_MUSIC
+            isImage -> Environment.DIRECTORY_PICTURES
+            else -> Environment.DIRECTORY_DOWNLOADS
+        }
+        val appFolder = "CinemaXPlayer"
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val collection = when {
+                isVideo -> MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+                isAudio -> MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+                isImage -> MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+                else -> MediaStore.Downloads.EXTERNAL_CONTENT_URI
+            }
+            val values = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+                put(MediaStore.MediaColumns.MIME_TYPE, mime)
+                put(MediaStore.MediaColumns.RELATIVE_PATH, "$folderName/$appFolder")
+                put(MediaStore.MediaColumns.IS_PENDING, 1)
+            }
+            val destination = context.contentResolver.insert(collection, values)
+                ?: throw IllegalStateException("تعذر إنشاء ملف الوجهة في التخزين العام.")
+            try {
+                context.contentResolver.openOutputStream(destination, "w")?.use { output ->
+                    FileInputStream(sourceFile).use { input -> input.copyTo(output, 64 * 1024) }
+                } ?: throw IllegalStateException("تعذر فتح ملف الوجهة للكتابة.")
+                val completed = ContentValues().apply {
+                    put(MediaStore.MediaColumns.IS_PENDING, 0)
+                }
+                context.contentResolver.update(destination, completed, null, null)
+                return "$folderName/$appFolder/$name"
+            } catch (error: Exception) {
+                runCatching { context.contentResolver.delete(destination, null, null) }
+                throw error
+            }
+        }
+
+        val publicBase = Environment.getExternalStoragePublicDirectory(folderName)
+        val targetDirectory = File(publicBase, appFolder)
+        if (!targetDirectory.exists() && !targetDirectory.mkdirs()) {
+            throw IllegalStateException("تعذر إنشاء مجلد التنزيلات.")
+        }
+        val targetFile = File(targetDirectory, name)
+        FileInputStream(sourceFile).use { input ->
+            FileOutputStream(targetFile).use { output -> input.copyTo(output, 64 * 1024) }
+        }
+        runCatching {
+            android.media.MediaScannerConnection.scanFile(
+                context,
+                arrayOf(targetFile.absolutePath),
+                arrayOf(mime),
+                null
+            )
+        }
+        return targetFile.absolutePath
+    }
+
+    private fun getExtensionFromUrl(url: String): String =
+        fileExtensionFromUrl(url) ?: "bin"
+
     private fun getExtensionFromMimeOrUrl(mime: String, url: String): String {
-        val map = MimeTypeMap.getSingleton()
-        val extFromMime = map.getExtensionFromMimeType(mime)
-        if (!extFromMime.isNullOrBlank()) return extFromMime
-        return getExtensionFromUrl(url)
+        fileExtensionFromUrl(url)?.let { return it }
+        return MimeTypeMap.getSingleton().getExtensionFromMimeType(mime)
+            ?.takeIf { it.isNotBlank() } ?: "bin"
     }
 
     fun formatSpeed(speedBytesPerSec: Long): String {
