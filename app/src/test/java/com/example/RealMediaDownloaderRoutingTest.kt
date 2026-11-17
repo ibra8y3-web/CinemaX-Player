@@ -47,7 +47,8 @@ class RealMediaDownloaderRoutingTest {
         assertTrue(result is RealMediaDownloader.VideoVerificationResult.SocialWebPage)
         result as RealMediaDownloader.VideoVerificationResult.SocialWebPage
         assertEquals("YouTube", result.platform)
-        assertTrue(result.advice.contains("لا يستخرج CinemaX"))
+        assertTrue(result.advice.contains("محرك المواقع"))
+        assertFalse(result.advice.contains("لا يستخرج CinemaX"))
     }
 
     @Test
