@@ -29,14 +29,26 @@ object M3uPlaylistParser {
     private const val DEFAULT_CATEGORY = "بث M3U المستورد"
 
     /** Accepts raw M3U text or one HTTP(S) URL pointing to an M3U file. */
-    fun loadInput(input: String): LoadedPlaylist {
+    fun loadInput(
+        input: String,
+        username: String = "",
+        password: String = ""
+    ): LoadedPlaylist {
         val trimmed = input.trim().removePrefix("\uFEFF")
         require(trimmed.isNotBlank()) { "أدخل رابط قائمة M3U أو محتوى القائمة." }
-        return if (isSingleHttpUrl(trimmed)) fetchPlaylist(trimmed) else LoadedPlaylist(trimmed)
+        return if (isSingleHttpUrl(trimmed)) {
+            fetchPlaylist(trimmed, username, password)
+        } else {
+            LoadedPlaylist(trimmed)
+        }
     }
 
     @Throws(Exception::class)
-    fun fetchPlaylist(rawUrl: String): LoadedPlaylist {
+    fun fetchPlaylist(
+        rawUrl: String,
+        username: String = "",
+        password: String = ""
+    ): LoadedPlaylist {
         val parsedUrl = URL(rawUrl.trim())
         require(parsedUrl.protocol.equals("http", true) || parsedUrl.protocol.equals("https", true)) {
             "رابط القائمة يجب أن يبدأ بـ http:// أو https://"
@@ -44,7 +56,9 @@ object M3uPlaylistParser {
 
         var connection: HttpURLConnection? = null
         try {
-            val active = parsedUrl.openConnection() as HttpURLConnection
+            val authenticatedUrl = appendMissingCredentials(rawUrl.trim(), username, password)
+            val requestUrl = URL(authenticatedUrl)
+            val active = requestUrl.openConnection() as HttpURLConnection
             connection = active
             active.apply {
                 requestMethod = "GET"
@@ -53,6 +67,10 @@ object M3uPlaylistParser {
                 readTimeout = READ_TIMEOUT_MS
                 setRequestProperty("User-Agent", "CinemaX-Player/2.0 (M3U IPTV importer)")
                 setRequestProperty("Accept", "audio/x-mpegurl, application/vnd.apple.mpegurl, text/plain, */*")
+                if (username.isNotBlank() || password.isNotBlank()) {
+                    val token = base64Utf8("$username:$password")
+                    setRequestProperty("Authorization", "Basic $token")
+                }
             }
             val responseCode = active.responseCode
             require(responseCode in 200..299) {
@@ -164,7 +182,7 @@ object M3uPlaylistParser {
                         val group = info?.group?.takeIf { it.isNotBlank() } ?: currentGroup
                         channels.add(
                             Channel(
-                                id = stableId(streamUrl),
+                                id = stableIdForUrl(streamUrl),
                                 title = title,
                                 url = streamUrl,
                                 category = group,
@@ -186,6 +204,37 @@ object M3uPlaylistParser {
             "لم يتم العثور على روابط قنوات داخل القائمة. تأكد من أن الملف يحتوي على #EXTINF متبوعاً برابط لكل قناة."
         }
         return channels
+    }
+
+    private fun appendMissingCredentials(rawUrl: String, username: String, password: String): String {
+        if (username.isBlank() && password.isBlank()) return rawUrl
+        val hasUsername = Regex("[?&]username=", RegexOption.IGNORE_CASE).containsMatchIn(rawUrl)
+        val hasPassword = Regex("[?&]password=", RegexOption.IGNORE_CASE).containsMatchIn(rawUrl)
+        val additions = buildList {
+            if (!hasUsername && username.isNotBlank()) add("username=${java.net.URLEncoder.encode(username, "UTF-8")}")
+            if (!hasPassword && password.isNotBlank()) add("password=${java.net.URLEncoder.encode(password, "UTF-8")}")
+        }
+        if (additions.isEmpty()) return rawUrl
+        return rawUrl + (if (rawUrl.contains("?")) "&" else "?") + additions.joinToString("&")
+    }
+
+    private fun base64Utf8(value: String): String {
+        val alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+        val bytes = value.toByteArray(Charsets.UTF_8)
+        val output = StringBuilder(((bytes.size + 2) / 3) * 4)
+        var index = 0
+        while (index < bytes.size) {
+            val b0 = bytes[index++].toInt() and 0xff
+            val hasB1 = index < bytes.size
+            val b1 = if (hasB1) bytes[index++].toInt() and 0xff else 0
+            val hasB2 = index < bytes.size
+            val b2 = if (hasB2) bytes[index++].toInt() and 0xff else 0
+            output.append(alphabet[b0 ushr 2])
+            output.append(alphabet[((b0 and 0x03) shl 4) or (b1 ushr 4)])
+            output.append(if (hasB1) alphabet[((b1 and 0x0f) shl 2) or (b2 ushr 6)] else '=')
+            output.append(if (hasB2) alphabet[b2 and 0x3f] else '=')
+        }
+        return output.toString()
     }
 
     private fun isSingleHttpUrl(value: String): Boolean {
@@ -250,9 +299,9 @@ object M3uPlaylistParser {
         return segment ?: url?.host ?: "قناة $index"
     }
 
-    private fun stableId(url: String): String {
+    fun stableIdForUrl(url: String): String {
         val bytes = MessageDigest.getInstance("SHA-256").digest(url.toByteArray(Charsets.UTF_8))
         val hex = bytes.take(12).joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
-        return "m3u_$hex"
+        return "iptv_$hex"
     }
 }

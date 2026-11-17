@@ -70,7 +70,8 @@ data class LiveStreamChannel(
     val backupUrls: List<String> = emptyList(),
     val isHealthy: Boolean = true,
     val failureCount: Int = 0,
-    val lastCheckedTimestamp: Long = 0L
+    val lastCheckedTimestamp: Long = 0L,
+    val logoUrl: String = ""
 )
 
 @Entity(tableName = "live_channels")
@@ -87,7 +88,8 @@ data class LiveStreamEntity(
     val backupUrlsString: String = "",
     val isHealthy: Boolean = true,
     val failureCount: Int = 0,
-    val lastCheckedTimestamp: Long = 0L
+    val lastCheckedTimestamp: Long = 0L,
+    val logoUrl: String = ""
 ) {
     fun toLiveStreamChannel(): LiveStreamChannel {
         val backups = if (backupUrlsString.isBlank()) emptyList() else backupUrlsString.split("|||")
@@ -104,7 +106,8 @@ data class LiveStreamEntity(
             backupUrls = backups,
             isHealthy = isHealthy,
             failureCount = failureCount,
-            lastCheckedTimestamp = lastCheckedTimestamp
+            lastCheckedTimestamp = lastCheckedTimestamp,
+            logoUrl = logoUrl
         )
     }
 
@@ -123,7 +126,8 @@ data class LiveStreamEntity(
                 backupUrlsString = c.backupUrls.joinToString("|||"),
                 isHealthy = c.isHealthy,
                 failureCount = c.failureCount,
-                lastCheckedTimestamp = c.lastCheckedTimestamp
+                lastCheckedTimestamp = c.lastCheckedTimestamp,
+                logoUrl = c.logoUrl
             )
         }
     }
