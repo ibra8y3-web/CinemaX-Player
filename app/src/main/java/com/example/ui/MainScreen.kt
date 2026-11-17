@@ -170,8 +170,9 @@ fun MainScreen(
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { grants ->
-        val granted = grants.values.any { it } || requiredPermissions.all {
-            ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+        val granted = requiredPermissions.all { permission ->
+            grants[permission] == true ||
+                ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
         }
         hasPermission = granted
         if (granted) {
