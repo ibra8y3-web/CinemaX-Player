@@ -168,7 +168,7 @@ jobs:
           - **Build type:** Debug
           - **Signing:** CI-generated Android debug key; this is not a production-signed release.
 
-          Download the APK that matches your device architecture. Use `SHA256SUMS.txt` to verify downloaded files.
+          Download the APK that matches your device architecture. Verify downloaded files with the SHA256SUMS.txt file.
           EOF
 
           gh release create "$tag" "${apk_files[@]}" release-assets/SHA256SUMS.txt             --repo "$GITHUB_REPOSITORY"             --target "$GITHUB_SHA"             --title "$title"             --notes-file release-notes.md             --latest
