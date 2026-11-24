@@ -101,3 +101,75 @@ jobs:
           name: CinemaX-Player-Unit-Test-Reports
           path: app/build/reports/tests/testDebugUnitTest/
           retention-days: 14
+
+  publish-release:
+    name: Publish APKs to GitHub Releases
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Download ABI APK artifacts
+        uses: actions/download-artifact@v7
+        with:
+          pattern: CinemaX-Player-Debug-APK-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Validate APKs and publish versioned release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mapfile -t apk_files < <(find release-assets -maxdepth 1 -type f -name '*.apk' -print | sort)
+          if [[ "${#apk_files[@]}" -ne 4 ]]; then
+            echo "::error::Expected exactly 4 ABI APK files, found ${#apk_files[@]}."
+            printf '%s\\n' "${apk_files[@]}"
+            exit 1
+          fi
+
+          for apk in "${apk_files[@]}"; do
+            if [[ ! -s "$apk" ]]; then
+              echo "::error::APK is missing or empty: $apk"
+              exit 1
+            fi
+          done
+
+          version_name="$(awk -F '"' '/^[[:space:]]*versionName[[:space:]]*=/ { print $2; exit }' app/build.gradle.kts)"
+          if [[ -z "$version_name" ]]; then
+            echo "::error::Could not read versionName from app/build.gradle.kts."
+            exit 1
+          fi
+
+          tag="v${version_name}-build.${GITHUB_RUN_NUMBER}"
+          title="CinemaX Player ${version_name} - Build ${GITHUB_RUN_NUMBER}"
+
+          (
+            cd release-assets
+            sha256sum *.apk > SHA256SUMS.txt
+          )
+
+          cat > release-notes.md <<EOF
+          ## CinemaX Player ${version_name}
+
+          This release was published automatically after the Android CI tests and APK build completed successfully.
+
+          - **App version:** ${version_name}
+          - **Build number:** ${GITHUB_RUN_NUMBER}
+          - **Source commit:** ${GITHUB_SHA}
+          - **Architectures:** ARM64-v8a, ARMv7, x86_64, x86
+          - **Build type:** Debug
+          - **Signing:** CI-generated Android debug key; this is not a production-signed release.
+
+          Download the APK that matches your device architecture. Use `SHA256SUMS.txt` to verify downloaded files.
+          EOF
+
+          gh release create "$tag" "${apk_files[@]}" release-assets/SHA256SUMS.txt             --repo "$GITHUB_REPOSITORY"             --target "$GITHUB_SHA"             --title "$title"             --notes-file release-notes.md             --latest
+
